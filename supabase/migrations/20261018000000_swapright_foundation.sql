@@ -1,11 +1,11 @@
 create extension if not exists pgcrypto;
 
-create type public.account_status as enum ('active', 'suspended', 'deleted');
-create type public.listing_type as enum ('free', 'for_sale');
-create type public.listing_condition as enum ('new', 'like_new', 'good', 'fair');
-create type public.listing_status as enum ('available', 'reserved', 'completed', 'withdrawn', 'hidden');
-create type public.reservation_status as enum ('pending', 'cancelled', 'expired', 'completed');
-create type public.report_target as enum ('listing', 'message', 'user');
+do $$ begin create type public.account_status as enum ('active', 'suspended', 'deleted'); exception when duplicate_object then null; end $$;
+do $$ begin create type public.listing_type as enum ('free', 'for_sale'); exception when duplicate_object then null; end $$;
+do $$ begin create type public.listing_condition as enum ('new', 'like_new', 'good', 'fair'); exception when duplicate_object then null; end $$;
+do $$ begin create type public.listing_status as enum ('available', 'reserved', 'completed', 'withdrawn', 'hidden'); exception when duplicate_object then null; end $$;
+do $$ begin create type public.reservation_status as enum ('pending', 'cancelled', 'expired', 'completed'); exception when duplicate_object then null; end $$;
+do $$ begin create type public.report_target as enum ('listing', 'message', 'user'); exception when duplicate_object then null; end $$;
 
 create table public.university_domains (
   domain text primary key check (domain = lower(domain)),
@@ -18,7 +18,7 @@ create table public.university_domains (
   created_at timestamptz not null default now()
 );
 
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   university_domain text references public.university_domains(domain),
@@ -32,6 +32,16 @@ create table public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.profiles add column if not exists email text not null default '';
+alter table public.profiles add column if not exists university_domain text;
+alter table public.profiles add column if not exists display_name text not null default '';
+alter table public.profiles add column if not exists dorm_building text;
+alter table public.profiles add column if not exists avatar_path text;
+alter table public.profiles add column if not exists onboarding_complete boolean not null default false;
+alter table public.profiles add column if not exists moderation_note text;
+alter table public.profiles add column if not exists suspended_until timestamptz;
+alter table public.profiles add column if not exists updated_at timestamptz not null default now();
 
 create index profiles_domain_idx on public.profiles(university_domain);
 create index profiles_status_idx on public.profiles(status);
@@ -47,7 +57,7 @@ begin
 end;
 $$;
 
-create trigger profiles_set_updated_at
+create trigger swapright_profiles_set_updated_at
 before update on public.profiles
 for each row execute function public.set_updated_at();
 
@@ -71,7 +81,7 @@ begin
 end;
 $$;
 
-create trigger profiles_protect_security_fields
+create trigger swapright_profiles_protect_security_fields
 before update on public.profiles
 for each row execute function public.protect_profile_security_fields();
 
@@ -101,6 +111,13 @@ declare
   matched_domain text;
 begin
   matched_domain := public.match_university_domain(new.email);
+  if matched_domain is null
+     and lower(split_part(new.email, '@', 2)) like '%.edu' then
+    matched_domain := lower(split_part(new.email, '@', 2));
+    insert into public.university_domains(domain, institution_name, country_code, source)
+    values (matched_domain, matched_domain, 'US', 'runtime .edu fallback')
+    on conflict (domain) do update set active = true;
+  end if;
   if matched_domain is null then
     raise exception 'University email domain is not recognized';
   end if;
@@ -112,7 +129,7 @@ begin
 end;
 $$;
 
-create trigger on_auth_user_created
+create trigger swapright_on_auth_user_created
 after insert on auth.users
 for each row execute function public.handle_new_user();
 
@@ -187,7 +204,7 @@ create table public.conversations (
   check (owner_id <> interested_user_id)
 );
 
-create table public.messages (
+create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   sender_id uuid not null references public.profiles(id) on delete cascade,
@@ -195,6 +212,9 @@ create table public.messages (
   created_at timestamptz not null default now(),
   read_at timestamptz
 );
+
+alter table public.messages add column if not exists conversation_id uuid;
+alter table public.messages add column if not exists read_at timestamptz;
 
 create index messages_conversation_idx on public.messages(conversation_id, created_at);
 

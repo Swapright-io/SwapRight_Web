@@ -10,7 +10,10 @@ export function emailDomain(email: string) {
 
 export function findUniversityDomain(email: string) {
   const domain = emailDomain(email);
-  return domainData.domains.find((entry) => domain === entry.domain || domain.endsWith(`.${entry.domain}`)) || null;
+  return domainData.domains.find((entry) => domain === entry.domain || domain.endsWith(`.${entry.domain}`)) ||
+    (domain.endsWith(".edu")
+      ? { domain, institution_name: "U.S. .edu institution", state: null, country_code: "US", source: "runtime .edu fallback" }
+      : null);
 }
 
 export function isRecognizedUniversityEmail(email: string) {

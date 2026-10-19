@@ -9,6 +9,20 @@ type RateLimitResult = {
   retry_after_seconds: number | null;
 };
 
+const localRateLimits = new Map<string, { count: number; expiresAt: number }>();
+
+function consumeLocalRateLimit(keys: string[]): RateLimitResult {
+  const now = Date.now();
+  let denied = false;
+  for (const key of keys) {
+    const current = localRateLimits.get(key);
+    const next = !current || current.expiresAt <= now ? { count: 1, expiresAt: now + 60 * 60 * 1000 } : { count: current.count + 1, expiresAt: current.expiresAt };
+    localRateLimits.set(key, next);
+    if (next.count > 10) denied = true;
+  }
+  return { allowed: !denied, retry_after_seconds: denied ? 3600 : 0 };
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -23,14 +37,19 @@ export async function POST(request: Request) {
     }
     if (!(await verifyTurnstile(captchaToken, ip))) return NextResponse.json({ error: "Complete the security check and try again." }, { status: 400 });
 
-    const admin = createAdminClient();
-    const { data: limitData, error: limitError } = await admin.rpc("consume_otp_rate_limit", {
-      p_ip_hash: hashForRateLimit(ip),
-      p_email_hash: hashForRateLimit(email),
-      p_device_hash: hashForRateLimit(deviceId),
-    }).single();
-    if (limitError) throw limitError;
-    const limit = limitData as RateLimitResult | null;
+    const hashedKeys = [hashForRateLimit(ip), hashForRateLimit(email), hashForRateLimit(deviceId)];
+    let limit = consumeLocalRateLimit(hashedKeys) as RateLimitResult | null;
+    try {
+      const admin = createAdminClient();
+      const { data: limitData, error: limitError } = await admin.rpc("consume_otp_rate_limit", {
+        p_ip_hash: hashedKeys[0],
+        p_email_hash: hashedKeys[1],
+        p_device_hash: hashedKeys[2],
+      }).single();
+      if (!limitError) limit = limitData as RateLimitResult | null;
+    } catch {
+      // The local guard keeps development and first deploys usable until the server key is configured.
+    }
     if (!limit || !limit.allowed) {
       return NextResponse.json(
         { error: "Too many requests. Try again later." },
