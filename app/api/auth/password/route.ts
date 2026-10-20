@@ -15,11 +15,11 @@ export async function POST(request: Request) {
     const mode = body.mode === "signup" ? "signup" : body.mode === "login" ? "login" : null;
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const ip = requestIp(request);
     const deviceId = typeof body.deviceId === "string" && body.deviceId.trim()
       ? body.deviceId.trim()
       : `${ip}:${email}`;
     const captchaToken = typeof body.captchaToken === "string" ? body.captchaToken : undefined;
-    const ip = requestIp(request);
 
     if (!mode) return NextResponse.json({ error: "Choose whether to create an account or log in." }, { status: 400 });
     if (!findUniversityDomain(email)) {

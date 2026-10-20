@@ -88,7 +88,7 @@ export default function MarketplaceShell({ user }: { user: User }) {
   const [error, setError] = useState("");
 
   const name = profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "Student";
-  const initials = name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+  const initials = name.split(/\s+/).map((part: string) => part[0]).slice(0, 2).join("").toUpperCase();
   const listingFormReady = newListing.title.trim().length >= 3
     && newListing.description.trim().length >= 8
     && Boolean(newListing.category && newListing.condition && newListing.listingType)
@@ -310,7 +310,8 @@ export default function MarketplaceShell({ user }: { user: User }) {
     else {
       const photoRows: { listing_id: string; owner_id: string; storage_path: string; sort_order: number }[] = [];
       let uploadError: string | null = null;
-      for (const [index, file] of imageFiles.entries()) {
+      for (let index = 0; index < imageFiles.length; index += 1) {
+        const file = imageFiles[index];
         const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
         const path = `${user.id}/${created.id}/${crypto.randomUUID()}.${extension}`;
         const { error: storageError } = await supabase.storage.from("listing-photos").upload(path, file, { contentType: file.type, upsert: false });
