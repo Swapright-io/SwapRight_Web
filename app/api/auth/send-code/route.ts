@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     if (!limit || !limit.allowed) {
       return NextResponse.json(
         { error: "Too many requests. Try again later." },
-        { status: 429, headers: { "Retry-After": String(limit?.retry_after_seconds || 3600) } },
+        { status: 429, headers: { "Retry-After": String(limit?.retry_after_seconds || 0) } },
       );
     }
 
@@ -62,7 +62,11 @@ export async function POST(request: Request) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ error: "Supabase is not configured or the request could not be completed." }, { status: 500 });
+  } catch (error) {
+    console.error("send-code failed:", error);
+    return NextResponse.json(
+      { error: "Supabase is not configured or the request could not be completed." },
+      { status: 500 },
+    );
   }
 }

@@ -1,150 +1,588 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { Check, PlusIcon, SearchIcon, ShieldIcon } from "@/components/icons";
+import { ArrowLeft, BellIcon, BrowseIcon, Check, ChevronRightIcon, FilterIcon, HelpIcon, InboxIcon, LocationIcon, LockIcon, NoResultsIcon, PlusIcon, ProfileIcon, ReservationIcon, SearchIcon, ShieldCheckIcon, FlagIcon } from "@/components/icons";
 
+const CATEGORIES = ["Furniture", "Electronics", "Books", "Clothing", "Kitchen", "Other"];
+const CONDITIONS = ["new", "like_new", "good", "fair"] as const;
+const PRICE_OPTIONS = ["Any price", "Under $10", "Under $20", "Under $50"];
+type ListingType = "free" | "for_sale";
+type Tab = "browse" | "reservations" | "inbox" | "profile";
 type Listing = {
-  id: string;
-  owner_id: string;
-  title: string;
-  description: string;
-  category: string;
-  condition: string;
-  listing_type: "free" | "for_sale";
-  asking_price_cents: number | null;
-  pickup_area: string;
-  status: string;
-  created_at: string;
-  owner_name?: string;
+  id: string; owner_id: string; title: string; description: string; category: string;
+  condition: string; listing_type: ListingType; asking_price_cents: number | null;
+  pickup_area: string; status: string; created_at: string; owner_name?: string; photos?: string[];
 };
-
-type Reservation = { id: string; listing_id: string; status: string; expires_at: string; listing?: { title?: string; pickup_area?: string } };
+type Reservation = {
+  id: string; listing_id: string; status: string; expires_at: string;
+  listing?: { title?: string; pickup_area?: string; owner_id?: string };
+};
 type Conversation = { id: string; listing_id: string; owner_id: string; interested_user_id: string };
 type Message = { id: string; body: string; sender_id: string; created_at: string };
-
-const emptyListing = { title: "", description: "", category: "", condition: "good", listingType: "free" as "free" | "for_sale", price: "", pickupArea: "" };
+type Profile = {
+  email: string; display_name: string; dorm_building: string | null;
+  university_domain: string; avatar_path: string | null; onboarding_complete: boolean;
+};
+type ProfileScreen = "account" | "notifications" | "blocked" | "guidelines" | "privacy" | "support";
+type NotificationRow = {
+  id: string; notification_type: "reservation" | "listing_report" | "message"; title: string; body: string;
+  listing_id: string | null; metadata: { reservee_name?: string; reservee_avatar_path?: string | null; sender_name?: string; sender_avatar_path?: string | null; warning?: string };
+  read_at: string | null; created_at: string; avatar_url?: string | null;
+};
+type NotificationPreferences = { reservation_alerts: boolean; message_alerts: boolean; safety_alerts: boolean };
+type BlockedPerson = { id: string; display_name: string; created_at: string };
+const defaultNotificationPreferences: NotificationPreferences = { reservation_alerts: true, message_alerts: true, safety_alerts: true };
+const REPORT_REASONS = [
+  { id: "prohibited_item", label: "Prohibited item", hint: "Weapons, alcohol or drugs, prescription medication, or other restricted items." },
+  { id: "misleading_or_scam", label: "Misleading or scam", hint: "Incorrect condition, fake or stolen item, non-functional product, or misleading photos." },
+  { id: "harassment", label: "Harassment or abusive conduct", hint: "Hate speech, personal insults, discriminatory content, or threats." },
+  { id: "inappropriate", label: "Inappropriate item or content", hint: "Sexual, graphic, unsafe, or otherwise inappropriate listing content." },
+  { id: "other", label: "Other concern", hint: "Something else that needs campus safety review." },
+];
+const emptyListing = { title: "", description: "", category: "", condition: "", listingType: "" as ListingType | "", price: "", pickupArea: "" };
 
 export default function MarketplaceShell({ user }: { user: User }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const [tab, setTab] = useState<"browse" | "reservations" | "inbox">("browse");
+  const [tab, setTab] = useState<Tab>("browse");
   const [listings, setListings] = useState<Listing[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationLabels, setConversationLabels] = useState<Record<string, string>>({});
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [institution, setInstitution] = useState("University marketplace");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "free" | "for_sale">("all");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [listingType, setListingType] = useState<"all" | ListingType>("all");
+  const [categories, setCategories] = useState<string[]>([]);
+  const [conditions, setConditions] = useState<string[]>([]);
+  const [price, setPrice] = useState("Any price");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [showNewChat, setShowNewChat] = useState(false);
   const [newListing, setNewListing] = useState(emptyListing);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState("");
+  const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
+  const [selectedPickup, setSelectedPickup] = useState("");
+  const [galleryIndex, setGalleryIndex] = useState(0);
+  const [profileScreen, setProfileScreen] = useState<ProfileScreen>("account");
+  const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [notificationPreferences, setNotificationPreferences] = useState(defaultNotificationPreferences);
+  const [blockedPeople, setBlockedPeople] = useState<BlockedPerson[]>([]);
+  const [reportingListing, setReportingListing] = useState<Listing | null>(null);
+  const [reportReason, setReportReason] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reportSubmitted, setReportSubmitted] = useState(false);
+  const [deleteAccountPrompt, setDeleteAccountPrompt] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission | "unsupported">("default");
+  const [error, setError] = useState("");
 
-  const name = user.user_metadata?.display_name || user.email?.split("@")[0] || "Student";
-  const initials = name.split(/\s+/).map((part: string) => part[0]).slice(0, 2).join("").toUpperCase();
+  const name = profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "Student";
+  const initials = name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+  const listingFormReady = newListing.title.trim().length >= 3
+    && newListing.description.trim().length >= 8
+    && Boolean(newListing.category && newListing.condition && newListing.listingType)
+    && newListing.pickupArea.trim().length >= 2
+    && (newListing.listingType !== "for_sale" || Number(newListing.price) > 0)
+    && imageFiles.length > 0;
 
   async function loadListings() {
     setLoading(true);
-    const { data, error: listingError } = await supabase.from("listings").select("id,owner_id,title,description,category,condition,listing_type,asking_price_cents,pickup_area,status,created_at").in("status", ["available", "reserved"]).order("created_at", { ascending: false });
+    const { data, error: listingError } = await supabase.from("listings")
+      .select("id,owner_id,title,description,category,condition,listing_type,asking_price_cents,pickup_area,status,created_at")
+      .in("status", ["available", "reserved"]).order("created_at", { ascending: false });
     if (listingError) { setError(listingError.message); setLoading(false); return; }
     const rows = (data || []) as Listing[];
     const ownerIds = Array.from(new Set(rows.map((row) => row.owner_id)));
-    const { data: profiles } = ownerIds.length ? await supabase.from("public_profiles").select("id,display_name").in("id", ownerIds) : { data: [] };
-    const names = new Map((profiles || []).map((profile: { id: string; display_name: string }) => [profile.id, profile.display_name]));
-    setListings(rows.map((row) => ({ ...row, owner_name: names.get(row.owner_id) || "Campus student" })));
+    const { data: profiles } = ownerIds.length
+      ? await supabase.from("public_profiles").select("id,display_name").in("id", ownerIds)
+      : { data: [] };
+    const names = new Map<string, string>((profiles || []).map((person: { id: string; display_name: string }) => [person.id, person.display_name] as [string, string]));
+    const ids = rows.map((row) => row.id);
+    const { data: photos } = ids.length ? await supabase.from("listing_photos").select("listing_id,storage_path,sort_order").in("listing_id", ids).order("sort_order") : { data: [] };
+    const urls = new Map<string, string[]>();
+    for (const photo of photos || []) {
+      const current = urls.get(photo.listing_id) || [];
+      current.push(supabase.storage.from("listing-photos").getPublicUrl(photo.storage_path).data.publicUrl);
+      urls.set(photo.listing_id, current);
+    }
+    setListings(rows.map((row) => ({ ...row, owner_name: names.get(row.owner_id) || "Campus student", photos: urls.get(row.id) || [] })));
     setLoading(false);
   }
 
   async function loadReservations() {
-    const { data } = await supabase.from("reservations").select("id,listing_id,status,expires_at,listings(title,pickup_area)").eq("claimant_id", user.id).order("created_at", { ascending: false });
+    const { data, error: reservationError } = await supabase.from("reservations")
+      .select("id,listing_id,status,expires_at,listings(title,pickup_area,owner_id)")
+      .eq("claimant_id", user.id).order("created_at", { ascending: false });
+    if (reservationError) setError(reservationError.message);
     setReservations((data || []) as Reservation[]);
   }
 
-  useEffect(() => { void loadListings(); void loadReservations(); }, []);
+  async function loadProfile() {
+    const { data, error: profileError } = await supabase.from("profiles")
+      .select("email,display_name,dorm_building,university_domain,avatar_path,onboarding_complete")
+      .eq("id", user.id).maybeSingle();
+    if (profileError) { setError(profileError.message); return; }
+    if (!data) return;
+    setProfile(data as Profile);
+    if (data.university_domain) {
+      const response = await fetch("/api/auth/check-domain", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: data.email }),
+      });
+      const school = await response.json() as { institution?: string | null };
+      setInstitution(school.institution || data.university_domain);
+    }
+  }
+
+  async function loadConversations() {
+    const { data, error: conversationError } = await supabase.from("conversations")
+      .select("id,listing_id,owner_id,interested_user_id")
+      .or(`owner_id.eq.${user.id},interested_user_id.eq.${user.id}`).order("created_at", { ascending: false });
+    if (conversationError) { setError(conversationError.message); return; }
+    const rows = (data || []) as Conversation[];
+    setConversations(rows);
+    const listingIds = Array.from(new Set(rows.map((row) => row.listing_id)));
+    const otherIds = Array.from(new Set(rows.map((row) => row.owner_id === user.id ? row.interested_user_id : row.owner_id)));
+    const [listingResult, peopleResult] = await Promise.all([
+      listingIds.length ? supabase.from("listings").select("id,title").in("id", listingIds) : Promise.resolve({ data: [] }),
+      otherIds.length ? supabase.from("public_profiles").select("id,display_name").in("id", otherIds) : Promise.resolve({ data: [] }),
+    ]);
+    const titles = new Map<string, string>((listingResult.data || []).map((row: { id: string; title: string }) => [row.id, row.title] as [string, string]));
+    const people = new Map<string, string>((peopleResult.data || []).map((row: { id: string; display_name: string }) => [row.id, row.display_name] as [string, string]));
+    setConversationLabels(Object.fromEntries(rows.map((row) => {
+      const otherId = row.owner_id === user.id ? row.interested_user_id : row.owner_id;
+      return [row.id, `${people.get(otherId) || "Student"} · ${titles.get(row.listing_id) || "Listing"}`] as [string, string];
+    })));
+  }
+
+  async function loadNotifications() {
+    const { data, error: notificationError } = await supabase.from("notifications")
+      .select("id,notification_type,title,body,listing_id,metadata,read_at,created_at")
+      .eq("user_id", user.id).order("created_at", { ascending: false }).limit(50);
+    if (notificationError) { setError(notificationError.message); return; }
+    const rows = (data || []) as NotificationRow[];
+    const enriched = await Promise.all(rows.map(async (row) => {
+      const path = row.metadata?.reservee_avatar_path || row.metadata?.sender_avatar_path;
+      if (!path || (row.notification_type !== "reservation" && row.notification_type !== "message")) return row;
+      const { data: signed } = await supabase.storage.from("avatars").createSignedUrl(path, 3600);
+      return { ...row, avatar_url: signed?.signedUrl || null };
+    }));
+    setNotifications(enriched);
+  }
+
+  async function loadNotificationPreferences() {
+    const { data, error: preferenceError } = await supabase.from("notification_preferences")
+      .upsert({ user_id: user.id }, { onConflict: "user_id" })
+      .select("reservation_alerts,message_alerts,safety_alerts").single();
+    if (preferenceError) { setError(preferenceError.message); return; }
+    setNotificationPreferences(data as NotificationPreferences);
+  }
+
+  async function loadBlockedPeople() {
+    const { data, error: blocksError } = await supabase.from("blocks").select("blocked_id,created_at")
+      .eq("blocker_id", user.id).order("created_at", { ascending: false });
+    if (blocksError) { setError(blocksError.message); return; }
+    const rows = data || [];
+    const ids = rows.map((row) => row.blocked_id);
+    const { data: profiles } = ids.length ? await supabase.from("public_profiles").select("id,display_name").in("id", ids) : { data: [] };
+    const names = new Map<string, string>((profiles || []).map((row: { id: string; display_name: string }) => [row.id, row.display_name] as [string, string]));
+    setBlockedPeople(rows.map((row) => ({ id: row.blocked_id, created_at: row.created_at, display_name: names.get(row.blocked_id) || "Student" })));
+  }
+
+  function openProfileScreen(screen: ProfileScreen) {
+    setProfileScreen(screen);
+    setError("");
+    if (screen === "notifications") { void loadNotifications(); void loadNotificationPreferences(); }
+    if (screen === "blocked") void loadBlockedPeople();
+  }
+
+  async function updateNotificationPreference(key: keyof NotificationPreferences, value: boolean) {
+    const previous = notificationPreferences;
+    const next = { ...previous, [key]: value };
+    setNotificationPreferences(next);
+    const { error: updateError } = await supabase.from("notification_preferences")
+      .upsert({ user_id: user.id, ...next }, { onConflict: "user_id" });
+    if (updateError) { setNotificationPreferences(previous); setError(updateError.message); }
+  }
+
+  async function allowBrowserNotifications() {
+    if (!("Notification" in window)) { setBrowserPermission("unsupported"); return; }
+    setBrowserPermission(await Notification.requestPermission());
+  }
+
+  async function markNotificationRead(notification: NotificationRow) {
+    if (notification.read_at) return;
+    const readAt = new Date().toISOString();
+    const { error: readError } = await supabase.from("notifications").update({ read_at: readAt }).eq("id", notification.id);
+    if (readError) setError(readError.message);
+    else setNotifications((current) => current.map((row) => row.id === notification.id ? { ...row, read_at: readAt } : row));
+  }
+
+  async function unblockPerson(person: BlockedPerson) {
+    const { error: unblockError } = await supabase.from("blocks").delete().eq("blocker_id", user.id).eq("blocked_id", person.id);
+    if (unblockError) setError(unblockError.message);
+    else setBlockedPeople((current) => current.filter((row) => row.id !== person.id));
+  }
+
+  async function submitListingReport(event: FormEvent) {
+    event.preventDefault();
+    if (!reportingListing || !reportReason) return;
+    setBusy(true); setError("");
+    const { error: reportError } = await supabase.from("reports").insert({
+      reporter_id: user.id, target_type: "listing", listing_id: reportingListing.id,
+      reported_user_id: reportingListing.owner_id, reason: reportReason, details: reportDetails.trim() || null,
+    });
+    if (reportError) setError(reportError.message);
+    else setReportSubmitted(true);
+    setBusy(false);
+  }
+
+  async function deleteAccount() {
+    setBusy(true); setError("");
+    const response = await fetch("/api/account/delete", { method: "POST" });
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) { setError(result.error || "We couldn't delete your account."); setBusy(false); return; }
+    await supabase.auth.signOut();
+    router.replace("/"); router.refresh();
+  }
+
+  useEffect(() => { void Promise.all([loadListings(), loadReservations(), loadProfile(), loadConversations(), loadNotifications(), loadBlockedPeople()]); }, []);
+  useEffect(() => {
+    if ("Notification" in window) setBrowserPermission(Notification.permission);
+    else setBrowserPermission("unsupported");
+    let cursor = new Date().toISOString();
+    let firstPoll = true;
+    const pollNotifications = async () => {
+      const { data } = await supabase.from("notifications").select("id,title,body,created_at")
+        .eq("user_id", user.id).gt("created_at", cursor).order("created_at", { ascending: true });
+      if (data?.length) cursor = data[data.length - 1].created_at;
+      if (!firstPoll && browserPermission === "granted") {
+        for (const item of data || []) new Notification(item.title, { body: item.body, tag: item.id });
+      }
+      firstPoll = false;
+      if (profileScreen === "notifications") void loadNotifications();
+    };
+    void pollNotifications();
+    const timer = window.setInterval(() => { void pollNotifications(); }, 20000);
+    return () => window.clearInterval(timer);
+  }, [browserPermission, profileScreen, supabase, user.id]);
+  useEffect(() => () => { imagePreviews.forEach((url) => URL.revokeObjectURL(url)); }, [imagePreviews]);
+  useEffect(() => {
+    if (!conversation) return;
+    const refreshMessages = async () => {
+      const { data } = await supabase.from("messages").select("id,body,sender_id,created_at")
+        .eq("conversation_id", conversation.id).order("created_at");
+      if (data) setMessages(data as Message[]);
+    };
+    const timer = window.setInterval(() => { void refreshMessages(); }, 4000);
+    return () => window.clearInterval(timer);
+  }, [conversation, supabase]);
 
   const visibleListings = listings.filter((listing) => {
-    const haystack = `${listing.title} ${listing.description} ${listing.category}`.toLowerCase();
-    return (!query || haystack.includes(query.toLowerCase())) && (filter === "all" || listing.listing_type === filter);
+    const haystack = `${listing.title} ${listing.description} ${listing.category} ${listing.pickup_area}`.toLowerCase();
+    const priceLimit = price === "Under $10" ? 1000 : price === "Under $20" ? 2000 : price === "Under $50" ? 5000 : null;
+    return (!query || haystack.includes(query.toLowerCase()))
+      && (listingType === "all" || listing.listing_type === listingType)
+      && (!categories.length || categories.includes(listing.category))
+      && (!conditions.length || conditions.includes(listing.condition))
+      && (priceLimit === null || listing.listing_type === "free" || (listing.asking_price_cents !== null && listing.asking_price_cents < priceLimit));
   });
 
   async function publishListing(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
-    const price = newListing.listingType === "for_sale" ? Math.round(Number(newListing.price) * 100) : null;
-    const { error: insertError } = await supabase.from("listings").insert({ owner_id: user.id, title: newListing.title.trim(), description: newListing.description.trim(), category: newListing.category.trim(), condition: newListing.condition, listing_type: newListing.listingType, asking_price_cents: price, pickup_area: newListing.pickupArea.trim() });
-    if (insertError) setError(insertError.message); else { setShowCreate(false); setNewListing(emptyListing); await loadListings(); }
+    if (!newListing.title.trim() || !newListing.description.trim() || !newListing.category || !newListing.condition || !newListing.listingType || !newListing.pickupArea.trim() || !imageFiles.length || (newListing.listingType === "for_sale" && !newListing.price)) {
+      setError("Complete every required field and upload at least one item photo before publishing."); setBusy(false); return;
+    }
+    const amount = newListing.listingType === "for_sale" ? Math.round(Number(newListing.price) * 100) : null;
+    const { data: created, error: insertError } = await supabase.from("listings").insert({ owner_id: user.id, title: newListing.title.trim(), description: newListing.description.trim(), category: newListing.category, condition: newListing.condition, listing_type: newListing.listingType as ListingType, asking_price_cents: amount, pickup_area: newListing.pickupArea.trim() }).select("id").single();
+    if (insertError || !created) setError(insertError?.message || "We couldn't create the listing.");
+    else {
+      const photoRows: { listing_id: string; owner_id: string; storage_path: string; sort_order: number }[] = [];
+      let uploadError: string | null = null;
+      for (const [index, file] of imageFiles.entries()) {
+        const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        const path = `${user.id}/${created.id}/${crypto.randomUUID()}.${extension}`;
+        const { error: storageError } = await supabase.storage.from("listing-photos").upload(path, file, { contentType: file.type, upsert: false });
+        if (storageError) { uploadError = storageError.message; break; }
+        photoRows.push({ listing_id: created.id, owner_id: user.id, storage_path: path, sort_order: index });
+      }
+      if (!uploadError) {
+        const { error: photoError } = await supabase.from("listing_photos").insert(photoRows);
+        uploadError = photoError?.message || null;
+      }
+      if (uploadError) {
+        if (photoRows.length) await supabase.storage.from("listing-photos").remove(photoRows.map((row) => row.storage_path));
+        await supabase.from("listings").delete().eq("id", created.id);
+        setError(`The listing photo upload failed: ${uploadError}`);
+      } else {
+        setShowCreate(false); setNewListing(emptyListing); setImageFiles([]); setImagePreviews([]); await loadListings();
+      }
+    }
     setBusy(false);
   }
 
-  async function claimListing(listing: Listing) {
+  async function claimListing(listing: Listing, navigateToReservations = true) {
     setBusy(true); setError("");
     const { error: claimError } = await supabase.rpc("claim_listing", { p_listing_id: listing.id });
-    if (claimError) setError(claimError.message); else { await loadListings(); await loadReservations(); setTab("reservations"); }
+    if (claimError) { setError(claimError.message); setBusy(false); return false; }
+    await Promise.all([loadListings(), loadReservations()]);
+    if (navigateToReservations) setTab("reservations");
     setBusy(false);
+    return true;
   }
 
   async function cancelReservation(reservationId: string) {
     setBusy(true);
     const { error: cancelError } = await supabase.rpc("cancel_reservation", { p_reservation_id: reservationId });
-    if (cancelError) setError(cancelError.message); else { await loadListings(); await loadReservations(); }
+    if (cancelError) setError(cancelError.message);
+    else { await Promise.all([loadListings(), loadReservations()]); }
     setBusy(false);
   }
 
-  async function openConversation(listing: Listing) {
-    setError("");
-    let { data: existing } = await supabase.from("conversations").select("id,listing_id,owner_id,interested_user_id").eq("listing_id", listing.id).eq("interested_user_id", user.id).maybeSingle();
-    if (!existing) {
-      const result = await supabase.from("conversations").insert({ listing_id: listing.id, owner_id: listing.owner_id, interested_user_id: user.id }).select("id,listing_id,owner_id,interested_user_id").single();
-      if (result.error) { setError(result.error.message); return; }
-      existing = result.data;
+  async function reserveSelectedListing() {
+    if (!selectedListing || !selectedPickup || selectedListing.owner_id === user.id || selectedListing.status !== "available") return;
+    const reserved = await claimListing(selectedListing, false);
+    if (reserved) {
+      setSelectedListing({ ...selectedListing, status: "reserved" });
     }
-    setConversation(existing as Conversation);
-    const { data: messageRows } = await supabase.from("messages").select("id,body,sender_id,created_at").eq("conversation_id", existing.id).order("created_at");
-    setMessages((messageRows || []) as Message[]); setTab("inbox");
+  }
+
+  function showListingDetails(listing: Listing) {
+    setSelectedListing(listing);
+    setSelectedPickup("");
+    setGalleryIndex(0);
+    setError("");
+  }
+
+  async function messageSelectedDonor() {
+    if (!selectedListing || selectedListing.owner_id === user.id) return;
+    const existing = conversations.find((item) => item.listing_id === selectedListing.id && item.interested_user_id === user.id);
+    if (existing) { await openConversation(existing); setSelectedListing(null); return; }
+    const reservation = reservations.find((item) => item.listing_id === selectedListing.id && item.status === "pending");
+    if (!reservation) return;
+    await startConversation({ ...reservation, listing: { ...reservation.listing, owner_id: selectedListing.owner_id } });
+    setSelectedListing(null);
+  }
+
+  async function openConversation(selected: Conversation) {
+    setError("");
+    const { data, error: messageError } = await supabase.from("messages")
+      .select("id,body,sender_id,created_at").eq("conversation_id", selected.id).order("created_at");
+    if (messageError) { setError(messageError.message); return; }
+    setConversation(selected); setMessages((data || []) as Message[]); setTab("inbox"); setShowNewChat(false);
+  }
+
+  async function startConversation(reservation: Reservation) {
+    if (!reservation.listing?.owner_id) { setError("We couldn't find the donor for this reservation."); return; }
+    const { data: existing, error: lookupError } = await supabase.from("conversations")
+      .select("id,listing_id,owner_id,interested_user_id").eq("listing_id", reservation.listing_id)
+      .eq("interested_user_id", user.id).maybeSingle();
+    if (lookupError) { setError(lookupError.message); return; }
+    if (existing) { await openConversation(existing as Conversation); return; }
+    const { data, error: createError } = await supabase.from("conversations").insert({
+      listing_id: reservation.listing_id, owner_id: reservation.listing.owner_id, interested_user_id: user.id,
+    }).select("id,listing_id,owner_id,interested_user_id").single();
+    if (createError) { setError(createError.message); return; }
+    await loadConversations();
+    await openConversation(data as Conversation);
   }
 
   async function sendMessage(event: FormEvent) {
     event.preventDefault();
     if (!conversation || !messageText.trim()) return;
-    const { data, error: messageError } = await supabase.from("messages").insert({ conversation_id: conversation.id, sender_id: user.id, body: messageText.trim() }).select("id,body,sender_id,created_at").single();
-    if (messageError) setError(messageError.message); else { setMessages((current) => [...current, data as Message]); setMessageText(""); }
+    const { data, error: messageError } = await supabase.from("messages")
+      .insert({ conversation_id: conversation.id, sender_id: user.id, body: messageText.trim() })
+      .select("id,body,sender_id,created_at").single();
+    if (messageError) setError(messageError.message);
+    else { setMessages((current) => [...current, data as Message]); setMessageText(""); }
   }
 
-  async function reportListing(listing: Listing) {
-    const details = window.prompt("Tell us what is wrong with this listing. Reports are reviewed by the SwapRight team.");
-    if (!details?.trim()) return;
-    const { error: reportError } = await supabase.from("reports").insert({ reporter_id: user.id, target_type: "listing", listing_id: listing.id, reported_user_id: listing.owner_id, reason: "other", details: details.trim() });
-    if (reportError) setError(reportError.message); else setError("Report submitted confidentially.");
+  async function signOut() { await supabase.auth.signOut(); router.push("/"); router.refresh(); }
+
+  function toggleValue(values: string[], value: string, setter: (next: string[]) => void) {
+    setter(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
   }
 
-  async function blockUser(listing: Listing) {
-    const { error: blockError } = await supabase.from("blocks").insert({ blocker_id: user.id, blocked_id: listing.owner_id });
-    if (blockError) setError(blockError.message); else { setError("This student is blocked. Their listings will no longer be available to you."); await loadListings(); }
+  function selectImages(files: FileList | null) {
+    const selected = Array.from(files || []);
+    if (selected.length > 8) { setImageFiles([]); setImagePreviews([]); setError("You can upload up to 8 photos for one item."); return; }
+    if (selected.some((file) => !["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024)) {
+      setImageFiles([]); setImagePreviews([]);
+      setError("Each photo must be a JPG, PNG, or WebP image under 5 MB.");
+      return;
+    }
+    setError("");
+    setImageFiles(selected);
+    setImagePreviews(selected.map((file) => URL.createObjectURL(file)));
   }
 
-  async function signOut() {
-    setBusy(true); await supabase.auth.signOut(); router.push("/"); router.refresh();
+  function closeCreateForm() {
+    setShowCreate(false);
+    setImageFiles([]);
+    setImagePreviews([]);
+    setNewListing(emptyListing);
   }
 
   return (
-    <main className="marketplace-page">
+    <main className={selectedListing ? "marketplace-page detail-mode" : "marketplace-page"}>
       <div className="marketplace-shell">
-        <header className="market-header"><div><span className="brand-mark">S</span><span className="brand-wordmark">SwapRight</span></div><button className="profile-chip" onClick={signOut} disabled={busy}><span>{initials}</span><b>{busy ? "Working…" : name}</b></button></header>
-        <section className="market-hero"><div><p className="eyebrow"><ShieldIcon /> Verified U.S. university community</p><h1>Find something useful.<br /><em>Pass it forward.</em></h1><p>Browse affordable and free goods from students right on campus.</p></div><button className="primary-button list-button" onClick={() => setShowCreate(true)}><PlusIcon /> List an item</button></section>
-        <nav className="market-tabs" aria-label="Marketplace sections"><button className={tab === "browse" ? "active" : ""} onClick={() => setTab("browse")}>Browse</button><button className={tab === "reservations" ? "active" : ""} onClick={() => { setTab("reservations"); void loadReservations(); }}>My reservations</button><button className={tab === "inbox" ? "active" : ""} onClick={() => setTab("inbox")}>Inbox</button></nav>
+        {!selectedListing && <header className="market-home-header">
+          <div><span>{institution}</span><h1>Hi, {name.split(" ")[0]}</h1></div>
+          <button className="market-avatar" aria-label="Open profile" onClick={() => { setProfileScreen("account"); setTab("profile"); }}>{initials}</button>
+        </header>}
+
         {error && <p className="market-error" role="alert">{error}</p>}
-        {tab === "browse" && <>
-          <div className="browse-toolbar"><label className="search-box"><SearchIcon /><input placeholder="Search campus listings" value={query} onChange={(event) => setQuery(event.target.value)} /></label><button className={filter === "all" ? "filter-button active" : "filter-button"} onClick={() => setFilter("all")}>All items</button><button className={filter === "free" ? "filter-button active" : "filter-button"} onClick={() => setFilter("free")}>Free</button><button className={filter === "for_sale" ? "filter-button active" : "filter-button"} onClick={() => setFilter("for_sale")}>For sale</button></div>
-          <section className="listing-grid" aria-live="polite">{loading ? <div className="loading-state">Loading listings…</div> : visibleListings.length ? visibleListings.map((listing) => <article className="listing-card" key={listing.id}><div className="listing-image"><span>{listing.category.slice(0, 1).toUpperCase()}</span></div><div className="listing-card-body"><div className="listing-meta"><span>{listing.listing_type === "free" ? "Free" : `$${((listing.asking_price_cents || 0) / 100).toFixed(2)}`}</span><small>{listing.condition.replace("_", " ")}</small></div><h2>{listing.title}</h2><p>{listing.description || "No description provided."}</p><div className="listing-footer"><span>{listing.owner_name} · {listing.pickup_area}</span>{listing.owner_id === user.id ? <small>Your listing</small> : <button onClick={() => void claimListing(listing)} disabled={busy || listing.status !== "available"}>{listing.status === "reserved" ? "Reserved" : "Claim"}</button>}</div><div className="listing-actions"><button onClick={() => void openConversation(listing)}>Message</button><button onClick={() => void reportListing(listing)}>Report</button>{listing.owner_id !== user.id && <button onClick={() => void blockUser(listing)}>Block</button>}</div></div></article>) : <div className="empty-market"><div className="empty-icon"><Check /></div><h2>No listings match that search.</h2><p>Try another keyword or list the first item for your campus.</p></div>}</section>
+
+        {reportingListing ? <section className="report-page">
+          <header className="report-page-header"><button type="button" onClick={() => { setReportingListing(null); setReportSubmitted(false); setReportReason(""); setReportDetails(""); }}><ArrowLeft /> Cancel</button><h1>Report listing</h1>{reportSubmitted ? <span /> : <button type="submit" form="listing-report-form" disabled={busy || !reportReason}>{busy ? "Sending…" : "Submit"}</button>}</header>
+          {reportSubmitted ? <div className="report-success"><div className="report-success-mark">✓</div><h2>Report received</h2><p>Thank you for helping keep the campus marketplace safe. The donor won’t be told who submitted this report.</p><button className="primary-button" onClick={() => { setReportingListing(null); setSelectedListing(null); setReportSubmitted(false); setReportReason(""); setReportDetails(""); }}>Back to Browse</button></div> : <>
+            <div className="report-listing-summary"><span>● Reporting listing</span><strong>{reportingListing.title}</strong><small>Listed by {reportingListing.owner_name || "Campus student"} · {reportingListing.pickup_area}</small></div>
+            <form id="listing-report-form" className="report-form" onSubmit={submitListingReport}><h2>Why are you reporting this listing?</h2>
+              <div className="report-reasons">{REPORT_REASONS.map((reason) => <label key={reason.id} className={reportReason === reason.id ? "report-reason selected" : "report-reason"}><input type="radio" name="report-reason" value={reason.id} checked={reportReason === reason.id} onChange={() => setReportReason(reason.id)} required /><span><strong>{reason.label}</strong><small>{reason.hint}</small></span></label>)}</div>
+              <label className="report-details-label">Additional information <em>Optional</em><textarea maxLength={1000} value={reportDetails} onChange={(event) => setReportDetails(event.target.value)} placeholder="Share details that may help our review." /></label>
+            </form>
+          </>}
+        </section> : selectedListing ? <section className="item-detail-page">
+          <button className="detail-back-button" onClick={() => setSelectedListing(null)} aria-label="Back to listings"><ArrowLeft /></button>
+          <div className="detail-gallery" onScroll={(event) => { const width = event.currentTarget.clientWidth || 1; setGalleryIndex(Math.round(event.currentTarget.scrollLeft / width)); }}>
+            {selectedListing.photos?.length ? selectedListing.photos.map((src, index) => <img key={src} src={src} alt={`${selectedListing.title}, photo ${index + 1}`} />) : <div className="detail-image-placeholder"><i /><b /><span /></div>}
+          </div>
+          {selectedListing.photos && selectedListing.photos.length > 1 && <div className="gallery-dots">{selectedListing.photos.map((src, index) => <span key={src} className={index === galleryIndex ? "active" : ""} />)}</div>}
+          <div className="detail-content">
+            <div className="detail-title-row"><div><h1>{selectedListing.title}{selectedListing.condition === "like_new" ? " — like new" : ""}</h1><p>{selectedListing.pickup_area} · Posted {formatPostedAt(selectedListing.created_at)}</p></div><div className="detail-side-actions"><span className="detail-price">{selectedListing.listing_type === "free" ? "Free" : `$${((selectedListing.asking_price_cents || 0) / 100).toFixed(2)}`}</span>{selectedListing.owner_id !== user.id && <button className="report-listing-button" aria-label="Report this listing" onClick={() => { setReportingListing(selectedListing); setReportReason(""); setReportDetails(""); setReportSubmitted(false); }}><FlagIcon /> Report</button>}</div></div>
+            <div className="detail-tags"><span>{selectedListing.condition.replace("_", " ")}</span><span>{selectedListing.category}</span><span>{selectedListing.status === "reserved" ? "Reserved" : "Available"}</span></div>
+            <h2>Description</h2><p className="detail-description">{selectedListing.description || "The donor did not add a description."}</p>
+            <div className="donor-location-card"><div className="donor-avatar">{(selectedListing.owner_name || "S").slice(0, 1).toUpperCase()}</div><div><strong>{selectedListing.owner_id === user.id ? "You · donor" : selectedListing.owner_name || "Campus student"}</strong><span><LocationIcon /> Pickup at {selectedListing.pickup_area}</span></div>{selectedListing.owner_id !== user.id && <span className="verified-pill">Verified</span>}</div>
+            {selectedListing.owner_id !== user.id && selectedListing.status === "available" && <label className="pickup-select-label">Choose pickup location<select required value={selectedPickup} onChange={(event) => setSelectedPickup(event.target.value)}><option value="">Select a pickup location</option><option value={selectedListing.pickup_area}>{selectedListing.pickup_area}</option></select></label>}
+            <div className="detail-actions"><button className="secondary-button detail-message-button" disabled={selectedListing.owner_id === user.id || !(reservations.some((row) => row.listing_id === selectedListing.id && row.status === "pending") || conversations.some((row) => row.listing_id === selectedListing.id && row.interested_user_id === user.id))} onClick={() => void messageSelectedDonor()}>Message donor</button><button className="primary-button detail-reserve-button" disabled={selectedListing.owner_id === user.id || selectedListing.status !== "available" || !selectedPickup || busy} onClick={() => void reserveSelectedListing()}>{selectedListing.owner_id === user.id ? "Your listing" : selectedListing.status === "reserved" ? "Reserved" : "SwapRight"}</button></div>
+          </div>
+        </section> : tab === "browse" && <>
+          <div className="search-row">
+            <label className="search-box"><SearchIcon /><input value={query} onFocus={() => setSearchFocused(true)} onChange={(event) => setQuery(event.target.value)} placeholder="Search items near you" /></label>
+            {searchFocused && <button className="open-filter-button" onClick={() => setShowFilters(true)}><FilterIcon /> Filters</button>}
+          </div>
+          <div className="quick-filters" aria-label="Quick listing filters">
+            {[{ label: "All", value: "all" }, { label: "Free", value: "free" }, { label: "For sale", value: "for_sale" }, { label: "Furniture", value: "Furniture" }, { label: "Books", value: "Books" }].map((item) => {
+              const active = item.value === "all" ? listingType === "all" && !categories.length : item.value === "free" || item.value === "for_sale" ? listingType === item.value : categories.includes(item.value);
+              return <button key={item.value} className={active ? "quick-filter active" : "quick-filter"} onClick={() => {
+                if (item.value === "all") { setListingType("all"); setCategories([]); }
+                else if (item.value === "free" || item.value === "for_sale") setListingType(item.value);
+                else toggleValue(categories, item.value, setCategories);
+              }}>{item.label}</button>;
+            })}
+          </div>
+          <div className="section-title"><h2>Available now</h2><span>{visibleListings.length} items</span></div>
+          <section className={visibleListings.length ? "listing-grid" : "listing-grid listing-grid-empty"} aria-live="polite">
+            {loading ? <div className="loading-state">Loading listings…</div> : visibleListings.length ? visibleListings.map((listing, index) => <article className="listing-card" key={listing.id}>
+              <button className="listing-card-main" onClick={() => showListingDetails(listing)} aria-label={`View details for ${listing.title}`}><div className={`listing-image shade-${index % 5}`}>{listing.photos?.[0] && <img src={listing.photos[0]} alt="" /> }<span>{listing.listing_type === "free" ? "Free" : `$${((listing.asking_price_cents || 0) / 100).toFixed(0)}`}</span></div><h3>{listing.title}</h3><p className="listing-location">{listing.pickup_area} · {listing.category}</p></button>
+              {listing.owner_id === user.id && <span className="your-listing-label">Your listing</span>}
+            </article>) : <div className="empty-market"><div className="no-results-badge"><NoResultsIcon /></div><h2>{listings.length ? "No listings match these filters." : "No items available right now."}</h2><p>{listings.length ? "Try another search or clear some filters to see more items." : "Check back soon, or be the first to share something with your campus."}</p>{listings.length > 0 && <button className="empty-reset-button" onClick={() => { setQuery(""); setListingType("all"); setCategories([]); setConditions([]); setPrice("Any price"); }}>Clear search and filters</button>}</div>}
+          </section>
         </>}
-        {tab === "reservations" && <section className="panel-section"><h2>My reservations</h2>{reservations.length ? reservations.map((reservation) => <article className="reservation-row" key={reservation.id}><div><strong>{reservation.listing?.title || "Reserved listing"}</strong><span>{reservation.listing?.pickup_area || "Campus pickup"} · Expires {new Date(reservation.expires_at).toLocaleString()}</span></div><div><span className={`status-pill ${reservation.status}`}>{reservation.status}</span>{reservation.status === "pending" && <button className="text-action" onClick={() => void cancelReservation(reservation.id)}>Cancel</button>}</div></article>) : <div className="empty-market compact-empty"><h2>No active reservations.</h2><p>Claim an available item and it will appear here for 24 hours.</p></div>}</section>}
-        {tab === "inbox" && <section className="panel-section inbox-panel"><h2>Private messages</h2>{conversation ? <><div className="message-thread">{messages.length ? messages.map((message) => <p className={message.sender_id === user.id ? "message mine" : "message"} key={message.id}>{message.body}</p>) : <p className="muted-copy">Start a private conversation about pickup, condition, or price.</p>}</div><form className="message-form" onSubmit={sendMessage}><input value={messageText} onChange={(event) => setMessageText(event.target.value)} placeholder="Write a message" /><button className="primary-button" type="submit">Send</button></form></> : <div className="empty-market compact-empty"><h2>Your inbox is private.</h2><p>Open a listing and choose Message to coordinate with another student.</p></div>}</section>}
-        <footer className="market-footer"><span><Check /> Verified university email</span><button onClick={signOut}>Sign out</button></footer>
-        {showCreate && <div className="modal-backdrop" role="presentation"><form className="create-modal" onSubmit={publishListing}><div className="modal-heading"><div><span className="eyebrow">New listing</span><h2>Give something a second life.</h2></div><button type="button" onClick={() => setShowCreate(false)} aria-label="Close">×</button></div><label>Title<input required minLength={3} value={newListing.title} onChange={(event) => setNewListing({ ...newListing, title: event.target.value })} /></label><label>Description<textarea value={newListing.description} onChange={(event) => setNewListing({ ...newListing, description: event.target.value })} /></label><div className="form-two"><label>Category<input required value={newListing.category} onChange={(event) => setNewListing({ ...newListing, category: event.target.value })} /></label><label>Condition<select value={newListing.condition} onChange={(event) => setNewListing({ ...newListing, condition: event.target.value })}><option value="new">New</option><option value="like_new">Like new</option><option value="good">Good</option><option value="fair">Fair</option></select></label></div><div className="form-two"><label>Type<select value={newListing.listingType} onChange={(event) => setNewListing({ ...newListing, listingType: event.target.value as "free" | "for_sale" })}><option value="free">Free</option><option value="for_sale">For sale</option></select></label>{newListing.listingType === "for_sale" && <label>Asking price<input required type="number" min="0" step="0.01" value={newListing.price} onChange={(event) => setNewListing({ ...newListing, price: event.target.value })} /></label>}</div><label>General pickup area<input required placeholder="e.g. Tiger Village" value={newListing.pickupArea} onChange={(event) => setNewListing({ ...newListing, pickupArea: event.target.value })} /></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Publishing…" : "Publish listing"}</button></form></div>}
+
+        {tab === "reservations" && <section className="page-panel"><div className="section-title"><h2>My Reservations</h2><span>{reservations.length}</span></div>{reservations.length ? reservations.map((reservation) => <article className="reservation-row" key={reservation.id}><div><strong>{reservation.listing?.title || "Reserved item"}</strong><span>{reservation.listing?.pickup_area || "Campus pickup"} · Expires {new Date(reservation.expires_at).toLocaleString()}</span></div><div><span className={`status-pill ${reservation.status}`}>{reservation.status}</span>{reservation.status === "pending" && <><button className="text-action" onClick={() => void startConversation(reservation)}>Message donor</button><button className="text-action" disabled={busy} onClick={() => void cancelReservation(reservation.id)}>Cancel</button></>}</div></article>) : <div className="empty-market compact-empty"><h2>No reservations yet</h2><p>Reserve an available listing and it will show up here.</p><button className="primary-button" onClick={() => setTab("browse")}>Browse items</button></div>}</section>}
+
+        {tab === "inbox" && <section className="page-panel inbox-page"><div className="section-title"><div><h2>Inbox</h2><span>Chat about reserved items</span></div><button className="new-chat-button" aria-label="Start a new chat" onClick={() => setShowNewChat((open) => !open)}><PlusIcon /></button></div>
+          {showNewChat && <div className="new-chat-panel"><h3>Message a donor</h3>{reservations.filter((row) => row.status === "pending").length ? reservations.filter((row) => row.status === "pending").map((reservation) => <button key={reservation.id} onClick={() => void startConversation(reservation)}>{reservation.listing?.title || "Reserved item"}<span>Message donor →</span></button>) : <p>Reserve an item first. You can message its donor while the reservation is active.</p>}</div>}
+          <div className="conversation-layout"><div className="conversation-list">{conversations.length ? conversations.map((row) => <button className={conversation?.id === row.id ? "conversation-item selected" : "conversation-item"} key={row.id} onClick={() => void openConversation(row)}>{conversationLabels[row.id] || "Conversation"}<span>Open chat</span></button>) : <div className="empty-market compact-empty"><h3>No conversations yet</h3><p>After you reserve an item, use + to contact its donor.</p></div>}</div>
+          <div className="chat-pane">{conversation ? <><div className="message-thread">{messages.length ? messages.map((message) => <p className={message.sender_id === user.id ? "message mine" : "message"} key={message.id}>{message.body}</p>) : <p className="muted-copy">Start the conversation about pickup, condition, or price.</p>}</div><form className="message-form" onSubmit={sendMessage}><input value={messageText} onChange={(event) => setMessageText(event.target.value)} placeholder="Write a message" /><button className="primary-button" type="submit">Send</button></form></> : <p className="chat-placeholder">Choose a conversation to view messages.</p>}</div></div>
+        </section>}
+
+        {tab === "profile" && <section className="page-panel profile-page">
+          {profileScreen === "account" ? <>
+            <h2 className="account-page-title">Account</h2>
+            <div className="profile-card account-summary"><div className="profile-avatar">{initials}</div><div className="account-summary-copy"><h2>{name}</h2><span className="verified-label">● Verified university student</span><p>{profile?.email || user.email} <small>Private · Read-only</small></p></div></div>
+            <h3 className="settings-section-title">Preferences &amp; safety</h3>
+            <div className="settings-card">
+              <button className="account-tile" onClick={() => openProfileScreen("notifications")}><span className="tile-icon green"><BellIcon /></span><span className="tile-copy"><strong>Push notifications</strong><small>Alerts for reservations, messages, and reports</small></span><span className="tile-action">Open settings {notifications.filter((item) => !item.read_at).length > 0 && <b>{notifications.filter((item) => !item.read_at).length}</b>}</span></button>
+              <button className="account-tile" onClick={() => openProfileScreen("blocked")}><span className="tile-icon gold"><ProfileIcon /></span><span className="tile-copy"><strong>Blocked users</strong><small>Restricted from messaging and holds</small></span><span className="tile-action">{blockedPeople.length} students</span></button>
+            </div>
+            <h3 className="settings-section-title">Student pilot &amp; support</h3>
+            <div className="settings-card">
+              <button className="account-tile" onClick={() => openProfileScreen("guidelines")}><span className="tile-icon lavender"><ShieldCheckIcon /></span><span className="tile-copy"><strong>Community guidelines &amp; safe handoffs</strong><small>Lobby meetup rules &amp; scam safeguards</small></span><ChevronRightIcon /></button>
+              <button className="account-tile" onClick={() => openProfileScreen("privacy")}><span className="tile-icon green"><LockIcon /></span><span className="tile-copy"><strong>Privacy &amp; data retention</strong><small>Rules for exchange records, reports, and account data</small></span><ChevronRightIcon /></button>
+              <button className="account-tile" onClick={() => openProfileScreen("support")}><span className="tile-icon mint"><HelpIcon /></span><span className="tile-copy"><strong>Campus pilot support</strong><small>Pilot student support inbox<br />(support@swaprightapp.com)</small></span><ChevronRightIcon /></button>
+            </div>
+            <h3 className="settings-section-title">Account actions</h3>
+            <div className="settings-card account-actions-card"><button className="account-action" onClick={() => void signOut()}>Sign out <ChevronRightIcon /></button><button className="account-action destructive" onClick={() => { setDeleteConfirmation(""); setDeleteAccountPrompt(true); }}>Delete account <span>●</span></button></div>
+          </> : <>
+            <header className="profile-subpage-header"><button onClick={() => openProfileScreen("account")} aria-label="Back to account"><ArrowLeft /></button><h2>{profileScreen === "notifications" ? "Push notifications" : profileScreen === "blocked" ? "Blocked users" : profileScreen === "guidelines" ? "Community guidelines" : profileScreen === "privacy" ? "Privacy & data retention" : "Campus pilot support"}</h2></header>
+            {profileScreen === "notifications" && <>
+              <p className="settings-intro">Choose which SwapRight activity should create an in-app notice. Browser alerts appear while the app is open and permission is enabled.</p>
+              <div className="settings-card notification-preferences">
+                <ToggleRow title="Reservations" description="When someone reserves one of your items" checked={notificationPreferences.reservation_alerts} onChange={(checked) => void updateNotificationPreference("reservation_alerts", checked)} />
+                <ToggleRow title="Messages" description="When a student sends you a chat message" checked={notificationPreferences.message_alerts} onChange={(checked) => void updateNotificationPreference("message_alerts", checked)} />
+                <ToggleRow title="Safety reports" description="When a student reports one of your listings" checked={notificationPreferences.safety_alerts} onChange={(checked) => void updateNotificationPreference("safety_alerts", checked)} />
+              </div>
+              {browserPermission === "granted" ? <p className="permission-note success">Browser notifications are allowed on this device.</p> : <button className="outline-action" onClick={() => void allowBrowserNotifications()}>{browserPermission === "unsupported" ? "Browser alerts are unavailable" : "Allow browser notifications"}</button>}
+              <div className="notification-heading"><h3>Recent activity</h3><button onClick={() => { void loadNotifications(); }}>Refresh</button></div>
+              <div className="notification-list">{notifications.length ? notifications.map((item) => <button className={item.read_at ? "notification-card read" : "notification-card unread"} key={item.id} onClick={() => void markNotificationRead(item)}><span className="notification-avatar">{item.avatar_url ? <img src={item.avatar_url} alt="" /> : item.notification_type === "reservation" ? (item.metadata.reservee_name || "S").slice(0, 1).toUpperCase() : item.notification_type === "listing_report" ? <FlagIcon /> : (item.metadata.sender_name || "S").slice(0, 1).toUpperCase()}</span><span className="notification-copy"><strong>{item.title}</strong><small>{item.body}</small>{item.notification_type === "listing_report" && <em>{item.metadata.warning || "Please recheck your listing photos, title, and description."}</em>}<time>{new Date(item.created_at).toLocaleString()}</time></span><span className="notification-dot" /></button>) : <div className="empty-settings"><BellIcon /><strong>No notifications yet</strong><span>Reservations, messages, and reports will appear here.</span></div>}</div>
+            </>}
+            {profileScreen === "blocked" && <><p className="settings-intro">Blocked students cannot message you or reserve your listings. You can unblock someone at any time.</p><div className="settings-card blocked-list">{blockedPeople.length ? blockedPeople.map((person) => <div className="blocked-row" key={person.id}><span className="blocked-avatar">{person.display_name.slice(0, 1).toUpperCase()}</span><span><strong>{person.display_name}</strong><small>Blocked {new Date(person.created_at).toLocaleDateString()}</small></span><button onClick={() => void unblockPerson(person)}>Unblock</button></div>) : <div className="empty-settings"><ProfileIcon /><strong>No blocked students</strong><span>Students you block will be listed here.</span></div>}</div></>}
+            {profileScreen === "guidelines" && <div className="information-panel"><p className="settings-intro">SwapRight is a student-to-student campus pilot. Keep exchanges respectful, clear, and in public campus spaces.</p><article><h3>List the real item</h3><p>Use current photos and an accurate title, condition, and price. Do not list prohibited items or items you do not own.</p></article><article><h3>Choose a safe handoff</h3><p>Meet in a well-lit public area, such as a staffed lobby. Tell someone you trust where you are going, and do not share passwords or financial account details.</p></article><article><h3>Keep communication in the app</h3><p>Use SwapRight messages to confirm item condition, pickup details, and any agreed price. Report suspicious behavior or listings.</p></article><button className="outline-action" onClick={() => { setSelectedListing(null); setTab("browse"); }}>Back to marketplace</button></div>}
+            {profileScreen === "privacy" && <div className="information-panel"><p className="settings-intro">Your university email is private and is not shown on public listings. Only the profile details needed for campus exchanges are displayed.</p><article><h3>What the app stores</h3><p>Account and profile details, your listings and photos, reservations, chat messages, blocks, and safety reports.</p></article><article><h3>How long it is kept</h3><p>Account-linked profile, listings, chats, reservations, and reports are removed when you delete your account. Listing photos and your profile image are removed from storage too.</p></article><a className="outline-action mail-action" href="mailto:support@swaprightapp.com?subject=SwapRight%20privacy%20request">Ask about your data</a></div>}
+            {profileScreen === "support" && <div className="information-panel"><div className="pilot-status"><span /> Student campus pilot</div><p className="settings-intro">Thanks for helping us test safer, simpler campus exchanges. Support can help with account access, reservations, reports, and listing problems.</p><article><h3>Before a handoff</h3><p>Confirm the item and pickup place in chat. Meet in a public campus location and do not send money outside an agreed sale.</p></article><article><h3>Need help?</h3><p>Email the SwapRight support team. Include the listing title and a short description of the issue; never include your password.</p></article><a className="primary-button support-email-button" href="mailto:support@swaprightapp.com?subject=SwapRight%20campus%20pilot%20support">Email support@swaprightapp.com</a><small className="support-address">Opens your system email app with the support address filled in.</small></div>}
+          </>}
+          {deleteAccountPrompt && <div className="modal-backdrop" role="presentation" onClick={() => setDeleteAccountPrompt(false)}><div className="delete-account-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-heading" onClick={(event) => event.stopPropagation()}><h2 id="delete-heading">Delete your account?</h2><p>This permanently deletes your profile, listings, messages, and reservations. This action cannot be undone.</p><label>Type DELETE to confirm<input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} /></label><div><button className="outline-action" onClick={() => setDeleteAccountPrompt(false)}>Cancel</button><button className="delete-confirm-button" disabled={deleteConfirmation !== "DELETE" || busy} onClick={() => void deleteAccount()}>{busy ? "Deleting…" : "Delete account"}</button></div></div></div>}
+        </section>}
+
+        {!selectedListing && <nav className="bottom-nav" aria-label="Main navigation">
+          <button className={tab === "browse" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setTab("browse"); }}><BrowseIcon />Browse</button>
+          <button className={tab === "reservations" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setTab("reservations"); void loadReservations(); }}><ReservationIcon />My Reservations</button>
+          <button className="nav-add" aria-label="Add a listing" onClick={() => setShowCreate(true)}><PlusIcon /></button>
+          <button className={tab === "inbox" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setTab("inbox"); void loadConversations(); }}><InboxIcon />Inbox</button>
+          <button className={tab === "profile" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setProfileScreen("account"); setTab("profile"); void loadProfile(); }}><ProfileIcon />Profile</button>
+        </nav>}
       </div>
+
+      {showFilters && <div className="filter-backdrop" role="presentation" onClick={() => setShowFilters(false)}><section className="filter-sheet" role="dialog" aria-modal="true" aria-labelledby="filter-heading" onClick={(event) => event.stopPropagation()}>
+        <div className="filter-handle" /><header><button onClick={() => setShowFilters(false)}>Cancel</button><h2 id="filter-heading">Filters</h2><button onClick={() => { setListingType("all"); setCategories([]); setConditions([]); setPrice("Any price"); }}>Reset</button></header>
+        <FilterGroup title="Listing type">{[["All", "all"], ["Free only", "free"], ["For sale only", "for_sale"]].map(([label, value]) => <button key={value} className={`filter-chip ${listingType === value ? "selected" : ""}`} onClick={() => setListingType(value as "all" | ListingType)}>{label}</button>)}</FilterGroup>
+        <FilterGroup title="Category">{CATEGORIES.map((category) => <button key={category} className={`filter-chip ${categories.includes(category) ? "selected" : ""}`} onClick={() => toggleValue(categories, category, setCategories)}>{category}</button>)}</FilterGroup>
+        <FilterGroup title="Condition">{CONDITIONS.map((condition) => <button key={condition} className={`filter-chip ${conditions.includes(condition) ? "selected" : ""}`} onClick={() => toggleValue(conditions, condition, setConditions)}>{condition.replace("_", " ")}</button>)}</FilterGroup>
+        <FilterGroup title="Price">{PRICE_OPTIONS.map((option) => <button key={option} className={`filter-chip ${price === option ? "selected" : ""}`} onClick={() => setPrice(option)}>{option}</button>)}</FilterGroup>
+        <button className="primary-button filter-results" onClick={() => setShowFilters(false)}>Show {visibleListings.length} results</button>
+      </section></div>}
+
+      {showCreate && <div className="modal-backdrop" role="presentation" onClick={closeCreateForm}><form className="create-modal" onSubmit={publishListing} onClick={(event) => event.stopPropagation()}>
+        <div className="modal-heading"><div><span className="eyebrow">New listing</span><h2>Give something a second life.</h2></div><button type="button" onClick={closeCreateForm} aria-label="Close">×</button></div>
+        <label>Title<input required minLength={3} value={newListing.title} onChange={(event) => setNewListing({ ...newListing, title: event.target.value })} /></label>
+        <label>Description<textarea required minLength={8} value={newListing.description} onChange={(event) => setNewListing({ ...newListing, description: event.target.value })} /></label>
+        <div className="form-two"><label>Category<select required value={newListing.category} onChange={(event) => setNewListing({ ...newListing, category: event.target.value })}><option value="" disabled>Choose a category</option>{CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label>Condition<select required value={newListing.condition} onChange={(event) => setNewListing({ ...newListing, condition: event.target.value })}><option value="" disabled>Choose condition</option><option value="new">New</option><option value="like_new">Like new</option><option value="good">Good</option><option value="fair">Fair</option></select></label></div>
+        <div className="form-two"><label>Listing type<select required value={newListing.listingType} onChange={(event) => setNewListing({ ...newListing, listingType: event.target.value as ListingType | "" })}><option value="" disabled>Choose listing type</option><option value="free">Free</option><option value="for_sale">For sale</option></select></label>{newListing.listingType === "for_sale" && <label>Asking price<input required type="number" min="0.01" step="0.01" value={newListing.price} onChange={(event) => setNewListing({ ...newListing, price: event.target.value })} /></label>}</div>
+        <label>Pickup location<input required minLength={2} placeholder="e.g. Pine Hall 214" value={newListing.pickupArea} onChange={(event) => setNewListing({ ...newListing, pickupArea: event.target.value })} /></label>
+        <label>Item photos (upload at least one)<input required type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => selectImages(event.target.files)} /></label>
+        {imagePreviews.length > 0 && <div className="photo-preview-grid">{imagePreviews.map((src, index) => <img key={src} src={src} alt={`Selected item photo ${index + 1}`} />)}</div>}
+        <button className="primary-button" type="submit" disabled={busy || !listingFormReady}>{busy ? "Publishing…" : "Publish listing"}</button>
+      </form></div>}
     </main>
   );
+}
+
+function FilterGroup({ title, children }: { title: string; children: ReactNode }) {
+  return <div className="filter-group"><h3>{title}</h3><div>{children}</div></div>;
+}
+
+function ToggleRow({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <label className="toggle-row"><span><strong>{title}</strong><small>{description}</small></span><input type="checkbox" role="switch" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i aria-hidden="true" /></label>;
+}
+
+function formatPostedAt(timestamp: string) {
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000));
+  if (elapsedSeconds < 60) return "just now";
+  if (elapsedSeconds < 3600) return `${Math.floor(elapsedSeconds / 60)}m ago`;
+  if (elapsedSeconds < 86400) return `${Math.floor(elapsedSeconds / 3600)}h ago`;
+  if (elapsedSeconds < 86400 * 30) return `${Math.floor(elapsedSeconds / 86400)}d ago`;
+  return new Date(timestamp).toLocaleDateString();
 }

@@ -7,7 +7,8 @@ import Script from "next/script";
 import { createClient } from "@/lib/supabase/client";
 import { ArrowLeft } from "@/components/icons";
 
-type Step = "welcome" | "signin" | "email" | "otp" | "profile";
+type Step = "welcome" | "signin" | "email" | "password" | "profile";
+type AuthMode = "signup" | "login";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return <button type="button" className="back-button" onClick={onClick} aria-label="Go back"><ArrowLeft /></button>;
@@ -16,8 +17,9 @@ function BackButton({ onClick }: { onClick: () => void }) {
 export default function AuthFlow() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("welcome");
+  const [mode, setMode] = useState<AuthMode>("signup");
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [dorm, setDorm] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -27,13 +29,6 @@ export default function AuthFlow() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [seconds, setSeconds] = useState(45);
-
-  useEffect(() => {
-    if (step !== "otp" || seconds <= 0) return;
-    const timer = window.setInterval(() => setSeconds((value) => Math.max(value - 1, 0)), 1000);
-    return () => window.clearInterval(timer);
-  }, [step, seconds]);
 
   useEffect(() => {
     const existing = window.localStorage.getItem("swapright-device-id");
@@ -45,7 +40,7 @@ export default function AuthFlow() {
   }, []);
 
   const initials = useMemo(() => {
-    const parts = displayName.trim().split(/\\s+/).filter(Boolean);
+    const parts = displayName.trim().split(/\s+/).filter(Boolean);
     return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SR";
   }, [displayName]);
 
@@ -59,17 +54,6 @@ export default function AuthFlow() {
     setStep(next);
   }
 
-  async function requestOtp(targetEmail: string) {
-    const captchaToken = document.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]')?.value;
-    const response = await fetch("/api/auth/send-code", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: targetEmail, deviceId, captchaToken }),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "We couldn't send a code. Please try again.");
-  }
-
   async function checkDomain(value: string) {
     const target = value.trim().toLowerCase();
     if (!target.includes("@")) {
@@ -78,11 +62,72 @@ export default function AuthFlow() {
       return false;
     }
     setDomainStatus("checking");
-    const response = await fetch("/api/auth/check-domain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: target }) });
-    const result = await response.json();
-    setDomainStatus(result.recognized ? "recognized" : "unknown");
-    setInstitution(result.institution || "");
-    return Boolean(result.recognized);
+    try {
+      const response = await fetch("/api/auth/check-domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: target }),
+      });
+      const result = await response.json();
+      setDomainStatus(result.recognized ? "recognized" : "unknown");
+      setInstitution(result.institution || "");
+      return Boolean(result.recognized);
+    } catch {
+      setDomainStatus("unknown");
+      setInstitution("");
+      return false;
+    }
+  }
+
+  async function continueToPassword(event: FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    const normalizedEmail = email.trim().toLowerCase();
+    const recognized = domainStatus === "recognized" || await checkDomain(normalizedEmail);
+    if (!recognized) {
+      setError("Use an email address issued by a recognized U.S. university.");
+      return;
+    }
+    setEmail(normalizedEmail);
+    goTo("password");
+  }
+
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault();
+    resetMessages();
+    if (mode === "signup" && password.length < 8) {
+      setError("Choose a password with at least 8 characters.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const captchaToken = document.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]')?.value;
+      const response = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, email, password, deviceId, captchaToken }),
+      });
+      const payload = await response.json();
+      if (payload.confirmationRequired) {
+        setNotice(payload.error || "Your account was created. Email confirmation must be disabled in Supabase to continue without email verification.");
+        setPassword("");
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "We couldn't complete sign-in. Please try again.");
+
+      setPassword("");
+      if (payload.onboardingComplete && payload.displayName) {
+        router.push("/marketplace");
+      } else {
+        setDisplayName(payload.displayName || "");
+        setStep("profile");
+      }
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "We couldn't complete sign-in. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function signInWithProvider(provider: "apple" | "google") {
@@ -97,64 +142,6 @@ export default function AuthFlow() {
       if (authError) throw authError;
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "We couldn't start social sign-in.");
-      setBusy(false);
-    }
-  }
-
-  async function sendCode(event: FormEvent) {
-    event.preventDefault();
-    resetMessages();
-    const normalizedEmail = email.trim().toLowerCase();
-
-    if (domainStatus !== "recognized") {
-      const recognized = await checkDomain(normalizedEmail);
-      if (!recognized) {
-        setError("Use an email address issued by a recognized U.S. university.");
-        return;
-      }
-    }
-
-    setBusy(true);
-    try {
-      await requestOtp(normalizedEmail);
-      setEmail(normalizedEmail);
-      setSeconds(45);
-      setCode("");
-      setNotice("Verification code sent.");
-      setStep("otp");
-    } catch (authError) {
-      setError(authError instanceof Error ? authError.message : "We couldn't send a code. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verifyCode(event: FormEvent) {
-    event.preventDefault();
-    resetMessages();
-    if (!/^\\d{6}$/.test(code)) {
-      setError("Enter the 6-digit code from your email.");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const supabase = createClient();
-      const { data, error: authError } = await supabase.auth.verifyOtp({ email, token: code, type: "email" });
-      if (authError) throw authError;
-      if (!data.user) throw new Error("We couldn't read your signed-in user.");
-
-      const { data: profile, error: profileError } = await supabase.from("profiles").select("onboarding_complete,status,display_name").eq("id", data.user.id).maybeSingle();
-      if (profileError) throw profileError;
-      if (profile?.status === "suspended") throw new Error("This account is suspended. Contact SwapRight support.");
-      if (profile?.onboarding_complete && profile.display_name) {
-        router.push("/marketplace");
-      } else {
-        setStep("profile");
-      }
-    } catch (authError) {
-      setError(authError instanceof Error ? authError.message : "That code was not accepted. Try again.");
-    } finally {
       setBusy(false);
     }
   }
@@ -196,21 +183,6 @@ export default function AuthFlow() {
     }
   }
 
-  async function resendCode() {
-    if (seconds > 0 || busy) return;
-    resetMessages();
-    setBusy(true);
-    try {
-      await requestOtp(email);
-      setSeconds(45);
-      setNotice("A new verification code is on its way.");
-    } catch (authError) {
-      setError(authError instanceof Error ? authError.message : "We couldn't resend the code.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (step === "welcome") {
     return (
       <main className="auth-page">
@@ -228,8 +200,8 @@ export default function AuthFlow() {
             </div>
             <div className="welcome-actions">
               <div className="pagination" aria-label="Step 1 of 3"><b /><i /><i /></div>
-              <button className="primary-button" onClick={() => goTo("signin")}>Get started</button>
-              <button className="link-button" onClick={() => goTo("signin")}>I already have an account</button>
+              <button className="primary-button" onClick={() => { setMode("signup"); goTo("signin"); }}>Get started</button>
+              <button className="link-button" onClick={() => { setMode("login"); goTo("email"); }}>I already have an account</button>
             </div>
           </div>
         </section>
@@ -245,13 +217,14 @@ export default function AuthFlow() {
             <BackButton onClick={() => goTo("welcome")} />
             <div className="auth-heading">
               <h1>Welcome to<br />SwapRight</h1>
-              <p>Sign in with your university account to get started.</p>
+              <p>Create an account or log in with your university email.</p>
             </div>
             <div className="auth-options">
               <button className="social-button social-dark" type="button" onClick={() => signInWithProvider("apple")}>Continue with Apple</button>
               <button className="social-button" type="button" onClick={() => signInWithProvider("google")}><span className="google-mark">G</span>Continue with Google</button>
               <div className="divider"><span /><em>or</em><span /></div>
-              <button className="primary-button" onClick={() => goTo("email")}>Continue with university email</button>
+              <button className="primary-button" onClick={() => { setMode("signup"); goTo("email"); }}>Create account with university email</button>
+              <button className="link-button" onClick={() => { setMode("login"); goTo("email"); }}>Log in with university email</button>
             </div>
             <p className="terms">By continuing you agree to our Terms of Service and Privacy Policy.</p>
           </div>
@@ -264,68 +237,51 @@ export default function AuthFlow() {
     return (
       <main className="auth-page">
         <section className="auth-card auth-screen">
-          <form className="auth-content email-content" onSubmit={sendCode}>
-            <BackButton onClick={() => goTo("signin")} />
+          <form className="auth-content email-content" onSubmit={continueToPassword}>
+            <BackButton onClick={() => goTo(mode === "login" ? "welcome" : "signin")} />
             <div className="auth-heading compact-heading">
-              <h1>What&apos;s your<br />university email?</h1>
-              <p>Use an email issued by a recognized U.S. university to join the campus marketplace.</p>
+              <h1>{mode === "signup" ? <>Create your<br />student account</> : <>Welcome back</>}</h1>
+              <p>Use an email issued by a recognized U.S. university.</p>
             </div>
             <div className="field-group">
               <label htmlFor="email">UNIVERSITY EMAIL</label>
-              <input id="email" type="email" autoComplete="email" placeholder="you@university.edu" value={email} onChange={(event) => { setEmail(event.target.value); setDomainStatus("idle"); }} onBlur={() => checkDomain(email)} required />
+              <input id="email" type="email" autoComplete="email" placeholder="you@university.edu" value={email} onChange={(event) => { setEmail(event.target.value); setDomainStatus("idle"); setInstitution(""); }} onBlur={() => { if (email.trim()) void checkDomain(email); }} required />
               {domainStatus === "recognized" && <p className="recognized"><Image src="/gsu-check.svg" alt="" width={16} height={16} /> {institution || "Recognized U.S. university domain"}</p>}
               {domainStatus === "unknown" && <p className="form-message error-message" role="status">We don&apos;t recognize this university domain yet.</p>}
             </div>
             <div className="form-spacer" />
             {error && <p className="form-message error-message" role="alert">{error}</p>}
             {notice && <p className="form-message success-message" role="status">{notice}</p>}
-             {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && <div className="cf-turnstile" data-sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY} />}
-             <button className="primary-button" type="submit" disabled={busy || domainStatus !== "recognized"}>{busy ? "Sending code…" : "Send verification code"}</button>
-             <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />
+            <button className="primary-button" type="submit" disabled={busy || domainStatus === "checking"}>{busy ? "Checking email…" : "Enter password"}</button>
           </form>
         </section>
       </main>
     );
   }
 
-  if (step === "otp") {
+  if (step === "password") {
     return (
       <main className="auth-page">
         <section className="auth-card auth-screen">
-          <form className="auth-content otp-content" onSubmit={verifyCode}>
+          <form className="auth-content email-content" onSubmit={submitPassword}>
             <BackButton onClick={() => goTo("email")} />
-            <div className="auth-heading">
-              <h1>Check your email</h1>
-              <p>We sent a 6-digit code to {email}</p>
+            <div className="auth-heading compact-heading">
+              <h1>{mode === "signup" ? "Choose a password" : "Enter your password"}</h1>
+              <p>{email}</p>
             </div>
-            <div className="otp-row" aria-label="6-digit verification code">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <input
-                  key={index}
-                  aria-label={`Digit ${index + 1}`}
-                  className={index === code.length ? "active" : ""}
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={code[index] || ""}
-                  onChange={(event) => {
-                    const digit = event.target.value.replace(/\\D/g, "").slice(-1);
-                    const next = code.split("");
-                    if (digit) next[index] = digit;
-                    else next.splice(index, 1);
-                    const nextCode = next.join("").slice(0, 6);
-                    setCode(nextCode);
-                    if (digit && index < 5) document.querySelector<HTMLInputElement>(`input[aria-label="Digit ${index + 2}"]`)?.focus();
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Backspace" && !code[index] && index > 0) document.querySelector<HTMLInputElement>(`input[aria-label="Digit ${index}"]`)?.focus();
-                  }}
-                />
-              ))}
+            <div className="field-group">
+              <label htmlFor="password">PASSWORD</label>
+              <input id="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength={mode === "signup" ? 8 : undefined} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "signup" ? "At least 8 characters" : "Your password"} required />
             </div>
             {error && <p className="form-message error-message" role="alert">{error}</p>}
             {notice && <p className="form-message success-message" role="status">{notice}</p>}
-            <div className="resend-row"><span>Didn&apos;t get it?</span><button type="button" className="link-button" disabled={seconds > 0 || busy} onClick={resendCode}>{seconds > 0 ? `Resend code (0:${String(seconds).padStart(2, "0")})` : "Resend code"}</button></div>
-            <button className="primary-button visually-hidden-submit" type="submit" disabled={busy}>Verify code</button>
+            {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && <div className="cf-turnstile" data-sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY} />}
+            <div className="form-spacer" />
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}</button>
+            <button type="button" className="link-button" onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setPassword(""); resetMessages(); }}>
+              {mode === "signup" ? "Already have an account? Log in" : "New to SwapRight? Create an account"}
+            </button>
+            {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />}
           </form>
         </section>
       </main>
@@ -336,7 +292,7 @@ export default function AuthFlow() {
     <main className="auth-page">
       <section className="auth-card auth-screen">
         <form className="auth-content profile-content" onSubmit={saveProfile}>
-          <div className="profile-topline"><span>Step 3 of 3</span><span>Required to continue</span></div>
+          <div className="profile-topline"><span>Profile setup</span><span>Required to continue</span></div>
           <div className="auth-heading compact-heading"><h1>Set up your profile</h1><p>So other students on campus can recognize you.</p></div>
           <label className="avatar-picker" htmlFor="photo-upload"><span className="avatar">{initials}</span><span><strong>{avatarFile ? avatarFile.name : "Add a photo"}</strong><small>Tap to upload · JPG or PNG, max 5 MB</small></span><input id="photo-upload" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0] || null; if (file && file.size > 5 * 1024 * 1024) { setError("Choose an image smaller than 5 MB."); return; } setAvatarFile(file); }} /></label>
           <div className="field-group"><label htmlFor="display-name">DISPLAY NAME</label><input id="display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" autoComplete="name" required /></div>
