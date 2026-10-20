@@ -254,8 +254,9 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .account-tile { display: flex; width: 100%; min-height: 62px; align-items: center; gap: 10px; padding: 10px 12px; color: var(--text); background: #fff; text-align: left; }
 .account-tile + .account-tile, .account-action + .account-action { border-top: 1px solid #e8ece9; }
 .account-tile:hover, .account-action:hover { background: #fbfdfc; }
-.tile-icon { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: 50%; }
-.tile-icon .icon-svg { width: 16px; height: 16px; }
+.tile-icon { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; }
+.tile-icon .icon-svg { width: 17px; height: 17px; }
+.chevron-icon { display: block; width: 16px; height: 16px; flex: 0 0 16px; color: #98a19c; }
 .tile-icon.green { color: #148262; background: #e3f5ed; }
 .tile-icon.gold { color: #bd7900; background: #fff2d8; }
 .tile-icon.lavender { color: #554ba4; background: #eeedfb; }
@@ -271,7 +272,8 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .account-action { display: flex; width: 100%; min-height: 48px; align-items: center; justify-content: space-between; padding: 0; color: var(--text); background: #fff; text-align: left; font-size: 12px; font-weight: 600; }
 .account-action .icon-svg { width: 14px; height: 14px; color: #a0a6a3; }
 .account-action.destructive { color: #cf3037; }
-.account-action.destructive span { font-size: 18px; }
+.destructive-action-icon { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: #cf3037; background: #fff0f0; }
+.account-action .destructive-action-icon .icon-svg { width: 13px; height: 13px; color: currentColor; }
 .profile-subpage-header { display: flex; min-height: 52px; align-items: center; gap: 12px; margin: 0 -4px 15px; border-bottom: 1px solid #e9eeeb; }
 .profile-subpage-header button { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 50%; color: var(--text); background: #f2f4f3; }
 .profile-subpage-header button .icon-svg { width: 18px; height: 18px; }
