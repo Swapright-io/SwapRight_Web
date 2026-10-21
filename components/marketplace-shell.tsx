@@ -14,7 +14,7 @@ type Tab = "browse" | "reservations" | "inbox" | "profile";
 type Listing = {
   id: string; owner_id: string; title: string; description: string; category: string;
   condition: string; listing_type: ListingType; asking_price_cents: number | null;
-  pickup_area: string; status: string; created_at: string; owner_name?: string; photos?: string[];
+  pickup_area: string; status: string; created_at: string; owner_name?: string; photos?: string[]; photoPaths?: string[];
 };
 type Reservation = {
   id: string; listing_id: string; status: string; expires_at: string;
@@ -24,7 +24,7 @@ type Conversation = { id: string; listing_id: string; owner_id: string; interest
 type Message = { id: string; body: string; sender_id: string; created_at: string };
 type Profile = {
   email: string; display_name: string; dorm_building: string | null;
-  university_domain: string; avatar_path: string | null; onboarding_complete: boolean;
+  university_domain: string; avatar_path: string | null; avatar_url?: string | null; onboarding_complete: boolean;
 };
 type ProfileScreen = "account" | "notifications" | "blocked" | "guidelines" | "privacy" | "support";
 type NotificationRow = {
@@ -64,8 +64,10 @@ export default function MarketplaceShell({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingListing, setEditingListing] = useState<Listing | null>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [keptPhotoPaths, setKeptPhotoPaths] = useState<string[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
   const [newListing, setNewListing] = useState(emptyListing);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -83,6 +85,8 @@ export default function MarketplaceShell({ user }: { user: User }) {
   const [reportDetails, setReportDetails] = useState("");
   const [reportSubmitted, setReportSubmitted] = useState(false);
   const [deleteAccountPrompt, setDeleteAccountPrompt] = useState(false);
+  const [signOutPrompt, setSignOutPrompt] = useState(false);
+  const [deleteListingPrompt, setDeleteListingPrompt] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission | "unsupported">("default");
   const [error, setError] = useState("");
@@ -94,7 +98,7 @@ export default function MarketplaceShell({ user }: { user: User }) {
     && Boolean(newListing.category && newListing.condition && newListing.listingType)
     && newListing.pickupArea.trim().length >= 2
     && (newListing.listingType !== "for_sale" || Number(newListing.price) > 0)
-    && imageFiles.length > 0;
+    && (editingListing ? keptPhotoPaths.length + imageFiles.length > 0 : imageFiles.length > 0);
 
   async function loadListings() {
     setLoading(true);
@@ -111,12 +115,16 @@ export default function MarketplaceShell({ user }: { user: User }) {
     const ids = rows.map((row) => row.id);
     const { data: photos } = ids.length ? await supabase.from("listing_photos").select("listing_id,storage_path,sort_order").in("listing_id", ids).order("sort_order") : { data: [] };
     const urls = new Map<string, string[]>();
+    const paths = new Map<string, string[]>();
     for (const photo of photos || []) {
       const current = urls.get(photo.listing_id) || [];
       current.push(supabase.storage.from("listing-photos").getPublicUrl(photo.storage_path).data.publicUrl);
       urls.set(photo.listing_id, current);
+      const currentPaths = paths.get(photo.listing_id) || [];
+      currentPaths.push(photo.storage_path);
+      paths.set(photo.listing_id, currentPaths);
     }
-    setListings(rows.map((row) => ({ ...row, owner_name: names.get(row.owner_id) || "Campus student", photos: urls.get(row.id) || [] })));
+    setListings(rows.map((row) => ({ ...row, owner_name: names.get(row.owner_id) || "Campus student", photos: urls.get(row.id) || [], photoPaths: paths.get(row.id) || [] })));
     setLoading(false);
   }
 
@@ -134,7 +142,12 @@ export default function MarketplaceShell({ user }: { user: User }) {
       .eq("id", user.id).maybeSingle();
     if (profileError) { setError(profileError.message); return; }
     if (!data) return;
-    setProfile(data as Profile);
+    let avatarUrl: string | null = null;
+    if (data.avatar_path) {
+      const { data: signedAvatar } = await supabase.storage.from("avatars").createSignedUrl(data.avatar_path, 3600);
+      avatarUrl = signedAvatar?.signedUrl || null;
+    }
+    setProfile({ ...(data as Profile), avatar_url: avatarUrl });
     if (data.university_domain) {
       const response = await fetch("/api/auth/check-domain", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -257,6 +270,22 @@ export default function MarketplaceShell({ user }: { user: User }) {
     router.replace("/"); router.refresh();
   }
 
+  async function deleteListing() {
+    if (!selectedListing || selectedListing.owner_id !== user.id) return;
+    setBusy(true); setError("");
+    const response = await fetch(`/api/listings/${selectedListing.id}`, { method: "DELETE" });
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) {
+      setError(result.error || "We couldn't delete this listing.");
+      setBusy(false);
+      return;
+    }
+    setDeleteListingPrompt(false);
+    setSelectedListing(null);
+    await Promise.all([loadListings(), loadReservations(), loadConversations()]);
+    setBusy(false);
+  }
+
   useEffect(() => { void Promise.all([loadListings(), loadReservations(), loadProfile(), loadConversations(), loadNotifications(), loadBlockedPeople()]); }, []);
   useEffect(() => {
     if ("Notification" in window) setBrowserPermission(Notification.permission);
@@ -301,35 +330,70 @@ export default function MarketplaceShell({ user }: { user: User }) {
 
   async function publishListing(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
-    if (!newListing.title.trim() || !newListing.description.trim() || !newListing.category || !newListing.condition || !newListing.listingType || !newListing.pickupArea.trim() || !imageFiles.length || (newListing.listingType === "for_sale" && !newListing.price)) {
+    const hasPhotos = editingListing ? keptPhotoPaths.length + imageFiles.length > 0 : imageFiles.length > 0;
+    if (!newListing.title.trim() || !newListing.description.trim() || !newListing.category || !newListing.condition || !newListing.listingType || !newListing.pickupArea.trim() || !hasPhotos || (newListing.listingType === "for_sale" && !newListing.price)) {
       setError("Complete every required field and upload at least one item photo before publishing."); setBusy(false); return;
     }
     const amount = newListing.listingType === "for_sale" ? Math.round(Number(newListing.price) * 100) : null;
-    const { data: created, error: insertError } = await supabase.from("listings").insert({ owner_id: user.id, title: newListing.title.trim(), description: newListing.description.trim(), category: newListing.category, condition: newListing.condition, listing_type: newListing.listingType as ListingType, asking_price_cents: amount, pickup_area: newListing.pickupArea.trim() }).select("id").single();
-    if (insertError || !created) setError(insertError?.message || "We couldn't create the listing.");
-    else {
-      const photoRows: { listing_id: string; owner_id: string; storage_path: string; sort_order: number }[] = [];
-      let uploadError: string | null = null;
-      for (let index = 0; index < imageFiles.length; index += 1) {
-        const file = imageFiles[index];
-        const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
-        const path = `${user.id}/${created.id}/${crypto.randomUUID()}.${extension}`;
-        const { error: storageError } = await supabase.storage.from("listing-photos").upload(path, file, { contentType: file.type, upsert: false });
-        if (storageError) { uploadError = storageError.message; break; }
-        photoRows.push({ listing_id: created.id, owner_id: user.id, storage_path: path, sort_order: index });
-      }
-      if (!uploadError) {
-        const { error: photoError } = await supabase.from("listing_photos").insert(photoRows);
-        uploadError = photoError?.message || null;
-      }
-      if (uploadError) {
-        if (photoRows.length) await supabase.storage.from("listing-photos").remove(photoRows.map((row) => row.storage_path));
-        await supabase.from("listings").delete().eq("id", created.id);
-        setError(`The listing photo upload failed: ${uploadError}`);
+    const values = {
+      title: newListing.title.trim(), description: newListing.description.trim(), category: newListing.category,
+      condition: newListing.condition, listing_type: newListing.listingType as ListingType,
+      asking_price_cents: amount, pickup_area: newListing.pickupArea.trim(),
+    };
+    let listingId = editingListing?.id || "";
+    if (editingListing) {
+      const { error: updateError } = await supabase.from("listings").update(values).eq("id", listingId).eq("owner_id", user.id);
+      if (updateError) { setError(updateError.message); setBusy(false); return; }
+    } else {
+      const { data: created, error: insertError } = await supabase.from("listings").insert({ owner_id: user.id, ...values }).select("id").single();
+      if (insertError || !created) { setError(insertError?.message || "We couldn't create the listing."); setBusy(false); return; }
+      listingId = created.id;
+    }
+
+    const uploadedPaths: string[] = [];
+    const photoRows: { listing_id: string; owner_id: string; storage_path: string; sort_order: number }[] = [];
+    let photoErrorMessage: string | null = null;
+    for (let index = 0; index < imageFiles.length; index += 1) {
+      const file = imageFiles[index];
+      const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const path = `${user.id}/${listingId}/${crypto.randomUUID()}.${extension}`;
+      const { error: storageError } = await supabase.storage.from("listing-photos").upload(path, file, { contentType: file.type, upsert: false });
+      if (storageError) { photoErrorMessage = storageError.message; break; }
+      uploadedPaths.push(path);
+      photoRows.push({ listing_id: listingId, owner_id: user.id, storage_path: path, sort_order: (editingListing?.photoPaths?.length || 0) + index });
+    }
+    if (!photoErrorMessage && photoRows.length) {
+      const { error: insertPhotosError } = await supabase.from("listing_photos").insert(photoRows);
+      photoErrorMessage = insertPhotosError?.message || null;
+    }
+    if (photoErrorMessage) {
+      if (uploadedPaths.length) await supabase.storage.from("listing-photos").remove(uploadedPaths);
+      if (!editingListing) await supabase.from("listings").delete().eq("id", listingId);
+      setError(`The listing photo upload failed: ${photoErrorMessage}`);
+      setBusy(false);
+      return;
+    }
+
+    const removedPaths = editingListing?.photoPaths?.filter((path) => !keptPhotoPaths.includes(path)) || [];
+    if (removedPaths.length) {
+      const { error: removeRowsError } = await supabase.from("listing_photos").delete().eq("listing_id", listingId).in("storage_path", removedPaths);
+      if (removeRowsError) {
+        setError(`Your listing was saved, but an old photo could not be removed: ${removeRowsError.message}`);
       } else {
-        setShowCreate(false); setNewListing(emptyListing); setImageFiles([]); setImagePreviews([]); await loadListings();
+        const { error: removeFilesError } = await supabase.storage.from("listing-photos").remove(removedPaths);
+        if (removeFilesError) setError(`Your listing was saved, but an old photo file could not be removed: ${removeFilesError.message}`);
       }
     }
+
+    if (editingListing) {
+      const finalPaths = [...keptPhotoPaths, ...uploadedPaths];
+      setSelectedListing({
+        ...editingListing, ...values, photoPaths: finalPaths,
+        photos: finalPaths.map((path) => supabase.storage.from("listing-photos").getPublicUrl(path).data.publicUrl),
+      });
+    }
+    closeCreateForm();
+    await loadListings();
     setBusy(false);
   }
 
@@ -411,13 +475,40 @@ export default function MarketplaceShell({ user }: { user: User }) {
 
   async function signOut() { await supabase.auth.signOut(); router.push("/"); router.refresh(); }
 
+  function openCreateForm() {
+    setEditingListing(null);
+    setNewListing(emptyListing);
+    setKeptPhotoPaths([]);
+    setImageFiles([]);
+    setImagePreviews([]);
+    setShowCreate(true);
+  }
+
+  function openEditListing(listing: Listing) {
+    setEditingListing(listing);
+    setNewListing({
+      title: listing.title,
+      description: listing.description,
+      category: listing.category,
+      condition: listing.condition,
+      listingType: listing.listing_type,
+      price: listing.asking_price_cents === null ? "" : (listing.asking_price_cents / 100).toFixed(2),
+      pickupArea: listing.pickup_area,
+    });
+    setKeptPhotoPaths(listing.photoPaths || []);
+    setImageFiles([]);
+    setImagePreviews([]);
+    setError("");
+    setShowCreate(true);
+  }
+
   function toggleValue(values: string[], value: string, setter: (next: string[]) => void) {
     setter(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
   }
 
   function selectImages(files: FileList | null) {
     const selected = Array.from(files || []);
-    if (selected.length > 8) { setImageFiles([]); setImagePreviews([]); setError("You can upload up to 8 photos for one item."); return; }
+    if (selected.length + (editingListing ? keptPhotoPaths.length : 0) > 8) { setImageFiles([]); setImagePreviews([]); setError("You can upload up to 8 photos for one item."); return; }
     if (selected.some((file) => !["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024)) {
       setImageFiles([]); setImagePreviews([]);
       setError("Each photo must be a JPG, PNG, or WebP image under 5 MB.");
@@ -430,6 +521,8 @@ export default function MarketplaceShell({ user }: { user: User }) {
 
   function closeCreateForm() {
     setShowCreate(false);
+    setEditingListing(null);
+    setKeptPhotoPaths([]);
     setImageFiles([]);
     setImagePreviews([]);
     setNewListing(emptyListing);
@@ -440,7 +533,7 @@ export default function MarketplaceShell({ user }: { user: User }) {
       <div className="marketplace-shell">
         {!selectedListing && <header className="market-home-header">
           <div><span>{institution}</span><h1>Hi, {name.split(" ")[0]}</h1></div>
-          <button className="market-avatar" aria-label="Open profile" onClick={() => { setProfileScreen("account"); setTab("profile"); }}>{initials}</button>
+          <button className="market-avatar" aria-label="Open profile" onClick={() => { setProfileScreen("account"); setTab("profile"); }}>{profile?.avatar_url ? <img src={profile.avatar_url} alt="" /> : initials}</button>
         </header>}
 
         {error && <p className="market-error" role="alert">{error}</p>}
@@ -466,7 +559,7 @@ export default function MarketplaceShell({ user }: { user: User }) {
             <h2>Description</h2><p className="detail-description">{selectedListing.description || "The donor did not add a description."}</p>
             <div className="donor-location-card"><div className="donor-avatar">{(selectedListing.owner_name || "S").slice(0, 1).toUpperCase()}</div><div><strong>{selectedListing.owner_id === user.id ? "You · donor" : selectedListing.owner_name || "Campus student"}</strong><span><LocationIcon /> Pickup at {selectedListing.pickup_area}</span></div>{selectedListing.owner_id !== user.id && <span className="verified-pill">Verified</span>}</div>
             {selectedListing.owner_id !== user.id && selectedListing.status === "available" && <label className="pickup-select-label">Choose pickup location<select required value={selectedPickup} onChange={(event) => setSelectedPickup(event.target.value)}><option value="">Select a pickup location</option><option value={selectedListing.pickup_area}>{selectedListing.pickup_area}</option></select></label>}
-            <div className="detail-actions"><button className="secondary-button detail-message-button" disabled={selectedListing.owner_id === user.id || !(reservations.some((row) => row.listing_id === selectedListing.id && row.status === "pending") || conversations.some((row) => row.listing_id === selectedListing.id && row.interested_user_id === user.id))} onClick={() => void messageSelectedDonor()}>Message donor</button><button className="primary-button detail-reserve-button" disabled={selectedListing.owner_id === user.id || selectedListing.status !== "available" || !selectedPickup || busy} onClick={() => void reserveSelectedListing()}>{selectedListing.owner_id === user.id ? "Your listing" : selectedListing.status === "reserved" ? "Reserved" : "SwapRight"}</button></div>
+            {selectedListing.owner_id === user.id ? <div className="detail-actions owner-listing-actions"><button className="secondary-button" onClick={() => openEditListing(selectedListing)}>Edit listing</button><button className="delete-listing-button" onClick={() => { setError(""); setDeleteListingPrompt(true); }}>Delete listing</button></div> : <div className="detail-actions"><button className="secondary-button detail-message-button" disabled={!(reservations.some((row) => row.listing_id === selectedListing.id && row.status === "pending") || conversations.some((row) => row.listing_id === selectedListing.id && row.interested_user_id === user.id))} onClick={() => void messageSelectedDonor()}>Message donor</button><button className="primary-button detail-reserve-button" disabled={selectedListing.status !== "available" || !selectedPickup || busy} onClick={() => void reserveSelectedListing()}>{selectedListing.status === "reserved" ? "Reserved" : "SwapRight"}</button></div>}
           </div>
         </section> : tab === "browse" && <>
           <div className="search-row">
@@ -503,7 +596,7 @@ export default function MarketplaceShell({ user }: { user: User }) {
         {tab === "profile" && <section className="page-panel profile-page">
           {profileScreen === "account" ? <>
             <h2 className="account-page-title">Account</h2>
-            <div className="profile-card account-summary"><div className="profile-avatar">{initials}</div><div className="account-summary-copy"><h2>{name}</h2><span className="verified-label">● Verified university student</span><p>{profile?.email || user.email} <small>Private · Read-only</small></p></div></div>
+            <div className="profile-card account-summary"><div className="profile-avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="" /> : initials}</div><div className="account-summary-copy"><h2>{name}</h2><span className="verified-label">● Verified university student</span><p>{profile?.email || user.email} <small>Private · Read-only</small></p></div></div>
             <h3 className="settings-section-title">Preferences &amp; safety</h3>
             <div className="settings-card">
               <button className="account-tile" onClick={() => openProfileScreen("notifications")}><span className="tile-icon green"><BellIcon /></span><span className="tile-copy"><strong>Push notifications</strong><small>Alerts for reservations, messages, and reports</small></span><span className="tile-action">Open settings {notifications.filter((item) => !item.read_at).length > 0 && <b>{notifications.filter((item) => !item.read_at).length}</b>}</span></button>
@@ -516,7 +609,7 @@ export default function MarketplaceShell({ user }: { user: User }) {
               <button className="account-tile" onClick={() => openProfileScreen("support")}><span className="tile-icon mint"><HelpIcon /></span><span className="tile-copy"><strong>Campus pilot support</strong><small>Pilot student support inbox<br />(support@swaprightapp.com)</small></span><ChevronRightIcon /></button>
             </div>
             <h3 className="settings-section-title">Account actions</h3>
-            <div className="settings-card account-actions-card"><button className="account-action" onClick={() => void signOut()}>Sign out <ChevronRightIcon /></button><button className="account-action destructive" onClick={() => { setDeleteConfirmation(""); setDeleteAccountPrompt(true); }}>Delete account <span className="destructive-action-icon"><TrashIcon /></span></button></div>
+            <div className="settings-card account-actions-card"><button className="account-action" onClick={() => setSignOutPrompt(true)}>Sign out <ChevronRightIcon /></button><button className="account-action destructive" onClick={() => { setDeleteConfirmation(""); setDeleteAccountPrompt(true); }}>Delete account <span className="destructive-action-icon"><TrashIcon /></span></button></div>
           </> : <>
             <header className="profile-subpage-header"><button onClick={() => openProfileScreen("account")} aria-label="Back to account"><ArrowLeft /></button><h2>{profileScreen === "notifications" ? "Push notifications" : profileScreen === "blocked" ? "Blocked users" : profileScreen === "guidelines" ? "Community guidelines" : profileScreen === "privacy" ? "Privacy & data retention" : "Campus pilot support"}</h2></header>
             {profileScreen === "notifications" && <>
@@ -538,10 +631,12 @@ export default function MarketplaceShell({ user }: { user: User }) {
           {deleteAccountPrompt && <div className="modal-backdrop" role="presentation" onClick={() => setDeleteAccountPrompt(false)}><div className="delete-account-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-heading" onClick={(event) => event.stopPropagation()}><h2 id="delete-heading">Delete your account?</h2><p>This permanently deletes your profile, listings, messages, and reservations. This action cannot be undone.</p><label>Type DELETE to confirm<input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} /></label><div><button className="outline-action" onClick={() => setDeleteAccountPrompt(false)}>Cancel</button><button className="delete-confirm-button" disabled={deleteConfirmation !== "DELETE" || busy} onClick={() => void deleteAccount()}>{busy ? "Deleting…" : "Delete account"}</button></div></div></div>}
         </section>}
 
+        {signOutPrompt && <div className="modal-backdrop" role="presentation" onClick={() => setSignOutPrompt(false)}><div className="delete-account-dialog" role="dialog" aria-modal="true" aria-labelledby="signout-heading" onClick={(event) => event.stopPropagation()}><h2 id="signout-heading">Sign out?</h2><p>You will need to sign back in to use your campus marketplace account.</p><div><button className="outline-action" onClick={() => setSignOutPrompt(false)}>Stay signed in</button><button className="primary-button" onClick={() => void signOut()}>Sign out</button></div></div></div>}
+
         {!selectedListing && <nav className="bottom-nav" aria-label="Main navigation">
           <button className={tab === "browse" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setTab("browse"); }}><BrowseIcon />Browse</button>
           <button className={tab === "reservations" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setTab("reservations"); void loadReservations(); }}><ReservationIcon />My Reservations</button>
-          <button className="nav-add" aria-label="Add a listing" onClick={() => setShowCreate(true)}><PlusIcon /></button>
+          <button className="nav-add" aria-label="Add a listing" onClick={openCreateForm}><PlusIcon /></button>
           <button className={tab === "inbox" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setTab("inbox"); void loadConversations(); }}><InboxIcon />Inbox</button>
           <button className={tab === "profile" ? "nav-item active" : "nav-item"} onClick={() => { setSelectedListing(null); setProfileScreen("account"); setTab("profile"); void loadProfile(); }}><ProfileIcon />Profile</button>
         </nav>}
@@ -557,16 +652,22 @@ export default function MarketplaceShell({ user }: { user: User }) {
       </section></div>}
 
       {showCreate && <div className="modal-backdrop" role="presentation" onClick={closeCreateForm}><form className="create-modal" onSubmit={publishListing} onClick={(event) => event.stopPropagation()}>
-        <div className="modal-heading"><div><span className="eyebrow">New listing</span><h2>Give something a second life.</h2></div><button type="button" onClick={closeCreateForm} aria-label="Close">×</button></div>
+        <div className="modal-heading"><div><span className="eyebrow">{editingListing ? "Edit listing" : "New listing"}</span><h2>{editingListing ? "Update your item details." : "Give something a second life."}</h2></div><button type="button" onClick={closeCreateForm} aria-label="Close">×</button></div>
         <label>Title<input required minLength={3} value={newListing.title} onChange={(event) => setNewListing({ ...newListing, title: event.target.value })} /></label>
         <label>Description<textarea required minLength={8} value={newListing.description} onChange={(event) => setNewListing({ ...newListing, description: event.target.value })} /></label>
         <div className="form-two"><label>Category<select required value={newListing.category} onChange={(event) => setNewListing({ ...newListing, category: event.target.value })}><option value="" disabled>Choose a category</option>{CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label>Condition<select required value={newListing.condition} onChange={(event) => setNewListing({ ...newListing, condition: event.target.value })}><option value="" disabled>Choose condition</option><option value="new">New</option><option value="like_new">Like new</option><option value="good">Good</option><option value="fair">Fair</option></select></label></div>
         <div className="form-two"><label>Listing type<select required value={newListing.listingType} onChange={(event) => setNewListing({ ...newListing, listingType: event.target.value as ListingType | "" })}><option value="" disabled>Choose listing type</option><option value="free">Free</option><option value="for_sale">For sale</option></select></label>{newListing.listingType === "for_sale" && <label>Asking price<input required type="number" min="0.01" step="0.01" value={newListing.price} onChange={(event) => setNewListing({ ...newListing, price: event.target.value })} /></label>}</div>
         <label>Pickup location<input required minLength={2} placeholder="e.g. Pine Hall 214" value={newListing.pickupArea} onChange={(event) => setNewListing({ ...newListing, pickupArea: event.target.value })} /></label>
-        <label>Item photos (upload at least one)<input required type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => selectImages(event.target.files)} /></label>
+        <label>{editingListing ? "Add or replace item photos" : "Item photos (upload at least one)"}<input required={!editingListing} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => selectImages(event.target.files)} /></label>
+        {editingListing && keptPhotoPaths.length > 0 && <div className="photo-preview-grid">{(editingListing.photos || []).map((src, index) => {
+          const path = editingListing.photoPaths?.[index];
+          if (!path || !keptPhotoPaths.includes(path)) return null;
+          return <div className="photo-preview-item" key={path}><img src={src} alt={`Current item photo ${index + 1}`} /><button type="button" onClick={() => setKeptPhotoPaths((current) => current.filter((item) => item !== path))}>Remove</button></div>;
+        })}</div>}
         {imagePreviews.length > 0 && <div className="photo-preview-grid">{imagePreviews.map((src, index) => <img key={src} src={src} alt={`Selected item photo ${index + 1}`} />)}</div>}
-        <button className="primary-button" type="submit" disabled={busy || !listingFormReady}>{busy ? "Publishing…" : "Publish listing"}</button>
+        <button className="primary-button" type="submit" disabled={busy || !listingFormReady}>{busy ? "Saving…" : editingListing ? "Save changes" : "Publish listing"}</button>
       </form></div>}
+      {deleteListingPrompt && selectedListing && <div className="modal-backdrop" role="presentation" onClick={() => setDeleteListingPrompt(false)}><div className="delete-account-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-listing-heading" onClick={(event) => event.stopPropagation()}><h2 id="delete-listing-heading">Delete this listing?</h2><p><strong>{selectedListing.title}</strong> will be removed, along with its photos and any active reservation. The student who reserved it will no longer see an active hold.</p><div><button className="outline-action" onClick={() => setDeleteListingPrompt(false)}>Keep listing</button><button className="delete-confirm-button" disabled={busy} onClick={() => void deleteListing()}>{busy ? "Deleting…" : "Delete listing"}</button></div></div></div>}
     </main>
   );
 }

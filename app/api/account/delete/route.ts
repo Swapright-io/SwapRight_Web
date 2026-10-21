@@ -30,8 +30,18 @@ export async function POST() {
       if (avatarCleanupError) throw avatarCleanupError;
     }
 
+    const { data: activeReservations, error: activeReservationsError } = await admin.from("reservations")
+      .select("listing_id").eq("claimant_id", user.id).eq("status", "pending");
+    if (activeReservationsError) throw activeReservationsError;
+    const claimedListingIds = Array.from(new Set((activeReservations || []).map((reservation) => reservation.listing_id)));
+
     const { error: claimantReservationsError } = await admin.from("reservations").delete().eq("claimant_id", user.id);
     if (claimantReservationsError) throw claimantReservationsError;
+    if (claimedListingIds.length) {
+      const { error: unreserveError } = await admin.from("listings").update({ status: "available" })
+        .in("id", claimedListingIds).eq("status", "reserved");
+      if (unreserveError) throw unreserveError;
+    }
     if (listingIds.length) {
       const { error: listingReservationsError } = await admin.from("reservations").delete().in("listing_id", listingIds);
       if (listingReservationsError) throw listingReservationsError;

@@ -23,6 +23,7 @@ export default function AuthFlow() {
   const [displayName, setDisplayName] = useState("");
   const [dorm, setDorm] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState("");
   const [domainStatus, setDomainStatus] = useState<"idle" | "checking" | "recognized" | "unknown">("idle");
   const [institution, setInstitution] = useState("");
@@ -38,6 +39,13 @@ export default function AuthFlow() {
     const authError = new URLSearchParams(window.location.search).get("error");
     if (authError) setError(authError.replaceAll("-", " "));
   }, []);
+
+  useEffect(() => {
+    if (!avatarFile) { setAvatarPreview(null); return; }
+    const preview = URL.createObjectURL(avatarFile);
+    setAvatarPreview(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [avatarFile]);
 
   const initials = useMemo(() => {
     const parts = displayName.trim().split(/\s+/).filter(Boolean);
@@ -294,7 +302,7 @@ export default function AuthFlow() {
         <form className="auth-content profile-content" onSubmit={saveProfile}>
           <div className="profile-topline"><span>Profile setup</span><span>Required to continue</span></div>
           <div className="auth-heading compact-heading"><h1>Set up your profile</h1><p>So other students on campus can recognize you.</p></div>
-          <label className="avatar-picker" htmlFor="photo-upload"><span className="avatar">{initials}</span><span><strong>{avatarFile ? avatarFile.name : "Add a photo"}</strong><small>Tap to upload · JPG or PNG, max 5 MB</small></span><input id="photo-upload" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0] || null; if (file && file.size > 5 * 1024 * 1024) { setError("Choose an image smaller than 5 MB."); return; } setAvatarFile(file); }} /></label>
+          <label className="avatar-picker" htmlFor="photo-upload"><span className="avatar">{avatarPreview ? <img src={avatarPreview} alt="Profile photo preview" /> : initials}</span><span><strong>{avatarFile ? avatarFile.name : "Add a photo"}</strong><small>Tap to upload · JPG or PNG, max 5 MB</small></span><input id="photo-upload" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0] || null; if (file && file.size > 5 * 1024 * 1024) { setError("Choose an image smaller than 5 MB."); event.currentTarget.value = ""; return; } setError(""); setAvatarFile(file); }} /></label>
           <div className="field-group"><label htmlFor="display-name">DISPLAY NAME</label><input id="display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" autoComplete="name" required /></div>
           <div className="field-group"><label htmlFor="dorm">DORM / BUILDING</label><input id="dorm" value={dorm} onChange={(event) => setDorm(event.target.value)} placeholder="Optional" /></div>
           <div className="form-spacer" />
