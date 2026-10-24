@@ -9,7 +9,8 @@ SwapRight is a campus marketplace web app for students to give away or sell usef
 - Finish a student profile with a display name and optional photo and residence information.
 - Browse, search, and filter campus listings by type, category, condition, and price.
 - Publish an item with a title, description, condition, category, price (if for sale), pickup location, and up to eight photos. At least one photo is required.
-- Reserve an available item for 24 hours. A student can have up to three active reservations.
+- Reserve an available item for 24 hours. Reserved items leave Browse, and a scheduled database task returns expired holds to availability. A student can have up to three active reservations.
+- Move a reservation through Pending, Claimed, and Cancelled history. The receiver can request handoff confirmation; the donor confirms or declines before the item is marked claimed or returned to Browse.
 - Message the donor after reserving the item, while the reservation is active.
 - Report a listing, block another student, and manage notification preferences.
 - Review reservation, message, and listing-report notices in the app. A listing-report notice does not reveal the reporter to the donor.
@@ -21,7 +22,7 @@ Browser notifications can be enabled while the app is open. Background push noti
 
 The app uses the Next.js App Router. The home route checks the Supabase session and shows sign-in/sign-up when the visitor is logged out; signed-in users go to the marketplace. Supabase Auth manages identity and sessions. The browser uses a public Supabase key, while privileged operations such as account deletion and password rate limiting use a server-only secret key.
 
-Supabase Postgres stores profiles, listings, reservations, conversations, messages, blocks, reports, and notification settings/notices. Row Level Security policies control which records authenticated users can access. Supabase Storage holds listing photos and profile photos. Database migrations define the tables, policies, storage rules, and database functions used for actions such as reserving an item and generating notifications.
+Supabase Postgres stores profiles, listings, reservations, conversations, messages, blocks, reports, and notification settings/notices. Row Level Security policies control which records authenticated users can access. Supabase Storage holds listing photos and profile photos. Database migrations define the tables, policies, storage rules, and database functions used for reserving items, confirming handoffs, expiring holds, and generating notifications. Reservation snapshots keep item details available in history if a donor removes a listing or their account.
 
 University email recognition uses a local U.S. university domain catalog in `data/us-university-domains.json`. The browser checks that catalog through an API route. Domains ending in `.edu` also have a database fallback so a new U.S. `.edu` domain can be accepted even if it is not in the catalog yet.
 

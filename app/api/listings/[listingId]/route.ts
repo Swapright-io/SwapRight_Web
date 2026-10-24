@@ -20,14 +20,15 @@ export async function DELETE(_request: Request, { params }: { params: { listingI
       .select("storage_path").eq("listing_id", listing.id);
     if (photosError) throw photosError;
     const photoPaths = (photos || []).map((photo) => photo.storage_path);
-    if (photoPaths.length) {
-      const { error: photoCleanupError } = await admin.storage.from("listing-photos").remove(photoPaths);
+    const { data: reservations, error: reservationsError } = await admin.from("reservations")
+      .select("photo_paths_snapshot").eq("listing_id", listing.id);
+    if (reservationsError) throw reservationsError;
+    const retainedPaths = new Set((reservations || []).flatMap((reservation) => reservation.photo_paths_snapshot || []));
+    const removablePaths = photoPaths.filter((path) => !retainedPaths.has(path));
+    if (removablePaths.length) {
+      const { error: photoCleanupError } = await admin.storage.from("listing-photos").remove(removablePaths);
       if (photoCleanupError) throw photoCleanupError;
     }
-
-    // Remove the hold so the claimant is not left with a reservation for a deleted item.
-    const { error: reservationError } = await admin.from("reservations").delete().eq("listing_id", listing.id);
-    if (reservationError) throw reservationError;
 
     const { error: deleteError } = await admin.from("listings").delete()
       .eq("id", listing.id).eq("owner_id", user.id);

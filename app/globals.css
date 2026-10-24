@@ -55,7 +55,7 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .listing-image span { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 18px; color: var(--brand-dark); background: rgba(255,255,255,.7); font-size: 27px; font-weight: 750; }
 .listing-card-body { padding: 16px; } .listing-meta, .listing-footer, .listing-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; } .listing-meta span { color: var(--brand-dark); font-weight: 800; } .listing-meta small { color: var(--muted); text-transform: capitalize; } .listing-card h2 { margin: 10px 0 5px; font-size: 19px; letter-spacing: -.25px; } .listing-card p { min-height: 42px; margin: 0 0 16px; color: var(--muted); font-size: 14px; line-height: 1.45; } .listing-footer { color: var(--muted); font-size: 12px; } .listing-footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .listing-footer button { padding: 8px 12px; border-radius: 999px; color: #fff; background: var(--brand); font-size: 12px; font-weight: 700; } .listing-actions { justify-content: flex-start; margin-top: 14px; padding-top: 12px; border-top: 1px solid #edf0ee; } .listing-actions button, .text-action { padding: 0; color: var(--muted); background: transparent; font-size: 12px; } .listing-actions button:hover, .text-action:hover { color: var(--brand-dark); }
 .loading-state { grid-column: 1 / -1; padding: 80px 0; color: var(--muted); text-align: center; } .panel-section { padding: 28px 0 48px; } .panel-section > h2 { margin: 0 0 16px; font-size: 25px; } .reservation-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 0; border-bottom: 1px solid #e1e6e3; } .reservation-row div { display: flex; align-items: center; gap: 14px; } .reservation-row div:first-child { flex-direction: column; align-items: flex-start; gap: 5px; } .reservation-row span { color: var(--muted); font-size: 13px; } .status-pill { padding: 4px 8px; border-radius: 999px; color: var(--brand-dark); background: var(--brand-soft); font-size: 11px !important; text-transform: capitalize; } .compact-empty { min-height: 260px; }
-.message-thread { min-height: 260px; display: flex; flex-direction: column; gap: 10px; padding: 20px; border: 1px solid #e1e6e3; border-radius: 16px; background: #fff; } .message { max-width: 70%; margin: 0; padding: 10px 13px; align-self: flex-start; border-radius: 14px 14px 14px 4px; background: #f1f4f2; } .message.mine { align-self: flex-end; border-radius: 14px 14px 4px 14px; color: #fff; background: var(--brand); } .muted-copy { margin: auto; color: var(--muted); } .message-form { display: flex; gap: 10px; margin-top: 12px; } .message-form input { flex: 1; min-width: 0; height: 48px; padding: 0 14px; border: 1px solid #dce3df; border-radius: 12px; outline: 0; } .message-form .primary-button { width: auto; min-height: 48px; }
+.message-thread { min-height: 260px; display: flex; flex-direction: column; gap: 10px; padding: 20px; border: 1px solid #e1e6e3; border-radius: 16px; background: #fff; } .message { max-width: 70%; margin: 0; padding: 10px 13px; align-self: flex-start; border-radius: 14px 14px 14px 4px; } .message.mine { align-self: flex-end; border-radius: 14px 14px 4px 14px; } .message.donor { color: #fff; background: #168761; } .message.receiver { color: #17496b; background: #e5f2fb; } .muted-copy { margin: auto; color: var(--muted); } .message-form { display: flex; gap: 10px; margin-top: 12px; } .message-form input { flex: 1; min-width: 0; height: 48px; padding: 0 14px; border: 1px solid #dce3df; border-radius: 12px; outline: 0; } .message-form .primary-button { width: auto; min-height: 48px; }
 .modal-backdrop { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(13, 31, 24, .42); } .create-modal { width: min(560px, 100%); max-height: calc(100vh - 48px); overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 26px; border-radius: 22px; background: #fff; box-shadow: 0 24px 80px rgba(0,0,0,.22); } .modal-heading { display: flex; justify-content: space-between; gap: 20px; } .modal-heading h2 { margin: 4px 0 0; font-size: 24px; } .modal-heading > button { width: 34px; height: 34px; border-radius: 50%; color: var(--muted); background: #f2f4f3; font-size: 22px; } .create-modal label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; } .create-modal input, .create-modal textarea, .create-modal select { width: 100%; padding: 11px 12px; border: 1px solid #dce3df; border-radius: 10px; outline: 0; color: var(--text); background: #fff; font-weight: 400; } .create-modal textarea { min-height: 90px; resize: vertical; } .create-modal input:focus, .create-modal textarea:focus, .create-modal select:focus { border-color: var(--brand); } .form-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cf-turnstile { min-height: 65px; }
 @media (max-width: 900px) { .listing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -112,21 +112,28 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .reservation-row strong { font-size: 14px; }
 .reservation-row div:first-child span { color: var(--muted); font-size: 12px; }
 .inbox-page .section-title { margin-bottom: 16px; }
-.new-chat-button { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--brand); }
-.new-chat-panel { margin-bottom: 14px; padding: 15px; border: 1px solid #e1e6e3; border-radius: 14px; background: #fff; }
-.new-chat-panel h3 { margin: 0 0 10px; font-size: 14px; }
-.new-chat-panel > button, .conversation-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid #edf0ee; color: var(--text); background: transparent; text-align: left; }
-.new-chat-panel > button span, .conversation-item span { color: var(--brand-dark); font-size: 12px; }
-.new-chat-panel p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.conversation-layout { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1.4fr); gap: 14px; }
+.conversation-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 4px; border-top: 1px solid #edf0ee; color: var(--text); background: transparent; text-align: left; }
 .conversation-list { padding: 0 12px; border: 1px solid #e1e6e3; border-radius: 14px; background: #fff; }
+.inbox-conversation-list { width: min(720px, 100%); margin: 0 auto; }
 .conversation-item { font-size: 13px; }
 .conversation-item.selected { color: var(--brand-dark); font-weight: 700; }
+.conversation-item-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+.conversation-item-copy strong { overflow: hidden; color: var(--text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-item-copy small { overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.unread-message-indicator { width: 11px; height: 11px; flex: 0 0 11px; margin-left: auto; border: 2px solid #fff; border-radius: 50%; background: #168fbd; box-shadow: 0 0 0 2px #d9f1e8; }
 .conversation-list .empty-market { min-height: 220px; padding: 20px 0; }
 .conversation-list .empty-market h3 { font-size: 15px; }
 .conversation-list .empty-market p { font-size: 12px; }
-.chat-pane { min-width: 0; }
-.chat-placeholder { min-height: 260px; display: grid; place-items: center; padding: 20px; border: 1px dashed #cdd5d1; border-radius: 14px; color: var(--muted); text-align: center; }
+.marketplace-page.chat-mode { height: 100dvh; min-height: 100dvh; overflow: hidden; padding: 0; overscroll-behavior: none; }
+.chat-detail-screen { position: fixed; z-index: 9; top: 0; left: 50%; width: min(760px, 100vw); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; padding: calc(12px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #f8fbf9; }
+.chat-detail-header { min-height: 58px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.chat-back-button { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border: 1px solid #dce5e0; border-radius: 50%; color: #185b46; background: #fff; }
+.chat-back-button svg { width: 19px; height: 19px; }
+.chat-detail-header > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.chat-detail-header strong { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.chat-detail-header span { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.chat-detail-screen .message-thread { min-height: 0; flex: 1 1 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.chat-detail-screen .message-form { flex: 0 0 auto; margin: 10px 0 0; padding: 0; }
 .profile-page { max-width: 600px; margin: 0 auto; }
 .profile-card { display: flex; align-items: center; gap: 14px; margin-bottom: 30px; padding: 18px; border-radius: 18px; background: var(--brand-soft); }
 .profile-avatar { width: 58px; height: 58px; font-size: 16px; }
@@ -156,8 +163,6 @@ button:disabled { cursor: not-allowed; opacity: .6; }
   .listing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .reservation-row { align-items: flex-start; flex-direction: column; gap: 10px; }
   .reservation-row > div:last-child { justify-content: flex-start; }
-  .conversation-layout { grid-template-columns: 1fr; }
-  .chat-placeholder { min-height: 130px; }
   .conversation-list .empty-market { min-height: 120px; }
   .filter-sheet { padding-right: 16px; padding-left: 16px; }
   .nav-item { font-size: 8px; }
@@ -246,6 +251,28 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .item-detail-page { position: relative; overflow: hidden; border-radius: 0 0 18px 18px; box-shadow: 0 8px 32px rgba(20,45,35,.06); }
 .detail-back-button { top: calc(14px + env(safe-area-inset-top)); left: 14px; box-shadow: 0 3px 12px rgba(12,35,25,.12); }
 .detail-gallery { height: min(52svh, 440px); }
+
+.reservation-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 8px 0 12px; padding: 4px; border-radius: 14px; background: #f1f4f2; }
+.reservation-tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; border-radius: 10px; color: var(--muted); background: transparent; font-size: 13px; font-weight: 650; }
+.reservation-tabs button.active { color: #157d5d; background: #fff; box-shadow: 0 2px 7px rgba(20,45,35,.08); }
+.reservation-tabs button span { min-width: 19px; padding: 2px 5px; border-radius: 999px; color: inherit; background: #e9efec; font-size: 10px; }
+.reservation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-top: 10px; }
+.reservation-card .listing-image { position: relative; height: 132px; overflow: hidden; }
+.reservation-card .listing-card-main h3 { margin: 11px 12px 4px; font-size: 14px; }
+.reservation-card .listing-card-main p { min-height: auto; margin: 0 12px 7px; font-size: 11px; }
+.reservation-card .listing-card-main .reservation-card-time { margin-bottom: 12px; color: #77837c; font-size: 10px; }
+.reservation-card-footer { display: flex; justify-content: flex-start; padding: 0 12px 12px; }
+.reservation-detail-meta { margin: 18px 0; padding: 14px; border: 1px solid #e2e9e5; border-radius: 14px; background: #f8fbf9; }
+.reservation-detail-meta h2 { margin-bottom: 9px; }
+.reservation-detail-meta p { margin: 5px 0; color: #526058; font-size: 12px; line-height: 1.45; }
+.reservation-detail-meta .hold-expiration, .reservation-detail-meta .hold-expiration strong { color: #bd2f2f; font-weight: 700; }
+.reservation-detail-meta .claim-waiting-note { color: #157d5d; font-weight: 650; }
+.claim-confirmed-note { margin: 18px 0 0; padding: 13px 15px; border: 1px solid #b9e5d4; border-radius: 12px; background: #effaf5; color: #157d5d; font-size: 14px; font-weight: 650; line-height: 1.45; }
+.reservation-detail-actions { flex-wrap: wrap; }
+.reservation-detail-actions > button { min-height: 44px; flex: 1 1 auto; font-size: 12px; }
+.reservation-detail-actions > .cancel-reservation-button { border: 1px solid #c83e3e; border-radius: 999px; color: #fff; background: #c83e3e; }
+.reservation-detail-actions > .cancel-reservation-button:hover { background: #aa3030; }
+@media (max-width: 420px) { .reservation-grid { gap: 9px; } .reservation-card .listing-image { height: 112px; } .reservation-tabs button { gap: 4px; font-size: 12px; } }
 
 /* Profile settings, notifications, and listing reports */
 .profile-page { max-width: 620px; padding-bottom: 28px; }

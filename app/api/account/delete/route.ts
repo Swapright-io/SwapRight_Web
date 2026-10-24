@@ -9,10 +9,6 @@ export async function POST() {
 
   try {
     const admin = createAdminClient();
-    const { data: ownedListings, error: listingLookupError } = await admin.from("listings").select("id").eq("owner_id", user.id);
-    if (listingLookupError) throw listingLookupError;
-    const listingIds = (ownedListings || []).map((listing) => listing.id);
-
     const [{ data: photos, error: photosError }, { data: profile, error: profileError }] = await Promise.all([
       admin.from("listing_photos").select("storage_path").eq("owner_id", user.id),
       admin.from("profiles").select("avatar_path").eq("id", user.id).maybeSingle(),
@@ -21,8 +17,13 @@ export async function POST() {
     if (profileError) throw profileError;
 
     const photoPaths = (photos || []).map((photo) => photo.storage_path);
-    if (photoPaths.length) {
-      const { error: photoCleanupError } = await admin.storage.from("listing-photos").remove(photoPaths);
+    const { data: reservationPhotoSnapshots, error: snapshotError } = await admin.from("reservations")
+      .select("photo_paths_snapshot").eq("donor_id", user.id);
+    if (snapshotError) throw snapshotError;
+    const retainedPaths = new Set((reservationPhotoSnapshots || []).flatMap((reservation) => reservation.photo_paths_snapshot || []));
+    const removablePaths = photoPaths.filter((path) => !retainedPaths.has(path));
+    if (removablePaths.length) {
+      const { error: photoCleanupError } = await admin.storage.from("listing-photos").remove(removablePaths);
       if (photoCleanupError) throw photoCleanupError;
     }
     if (profile?.avatar_path) {
@@ -42,11 +43,8 @@ export async function POST() {
         .in("id", claimedListingIds).eq("status", "reserved");
       if (unreserveError) throw unreserveError;
     }
-    if (listingIds.length) {
-      const { error: listingReservationsError } = await admin.from("reservations").delete().in("listing_id", listingIds);
-      if (listingReservationsError) throw listingReservationsError;
-    }
-
+    // Reservations for the user's own listings remain as cancelled history.
+    // The database trigger snapshots that state before the listings cascade away.
     const { error: deleteUserError } = await admin.auth.admin.deleteUser(user.id);
     if (deleteUserError) throw deleteUserError;
     return NextResponse.json({ ok: true });
