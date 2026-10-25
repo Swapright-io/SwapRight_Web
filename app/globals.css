@@ -22,7 +22,7 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .welcome-screen { width: min(1080px, 100%); }
 .welcome-content { min-height: min(760px, calc(100svh - 48px)); padding: clamp(36px, 7vw, 84px); display: grid; grid-template-columns: minmax(260px, .9fr) minmax(320px, 1fr); grid-template-rows: 1fr auto; align-items: center; gap: 28px clamp(42px, 7vw, 96px); }
 .hero-art { width: min(100%, 440px); aspect-ratio: 1; height: auto; position: relative; overflow: hidden; justify-self: center; grid-row: 1 / -1; border-radius: clamp(28px, 5vw, 48px); background: var(--brand-soft); }
-.art-card { position: absolute; display: block; border-radius: 12px; } .art-electronics { left: 12.5%; top: 25%; width: 43.75%; height: 31.25%; background: #e1f5ee; } .art-furniture { left: 46.875%; top: 37.5%; width: 37.5%; height: 28.125%; background: #faeeda; } .art-books { left: 21.875%; top: 56.25%; width: 31.25%; height: 25%; background: #eeedfe; } .art-arrow { position: absolute; left: 40.625%; top: 40.625%; width: 18.75%; height: 18.75%; display: grid; place-items: center; border-radius: 999px; background: var(--brand); color: #fff; font-size: clamp(22px, 4vw, 34px); }
+.hero-logo { border-radius: 0; background: transparent; }
 .welcome-copy { width: 100%; text-align: left; align-self: end; } .welcome-copy h1 { margin: 0 0 12px; font-size: clamp(34px, 4vw, 52px); line-height: 1.05; letter-spacing: -1.5px; } .welcome-copy p { max-width: 520px; margin: 0; color: var(--muted); font-size: clamp(16px, 2vw, 19px); line-height: 1.5; }
 .welcome-actions { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 18px; } .pagination { display: flex; align-items: center; gap: 6px; } .pagination b { width: 24px; height: 6px; border-radius: 3px; background: var(--brand); } .pagination i { width: 6px; height: 6px; border-radius: 3px; background: #767680; }
 .primary-button, .secondary-button { min-height: 52px; width: 100%; padding: 0 22px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 999px; font-size: 17px; font-weight: 600; transition: transform .18s, background .18s; } .primary-button { color: #fff; background: var(--brand); } .primary-button:hover { background: var(--brand-dark); transform: translateY(-1px); } .secondary-button { color: var(--brand-dark); background: var(--brand-soft); }
@@ -221,6 +221,8 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .donor-location-card span { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
 .donor-location-card .icon-svg { width: 14px; height: 14px; }
 .donor-location-card .verified-pill { padding: 4px 7px; border-radius: 999px; color: #157d5d; background: #e9f7f0; font-size: 9px; }
+.donor-location-card .donor-message-inline { min-height: 34px; flex: 0 0 auto; padding: 0 10px; border: 1px solid #168761; border-radius: 999px; color: #157d5d; background: #fff; font-size: 10px; font-weight: 700; }
+.donor-location-card .donor-message-inline:disabled { border-color: #dce6e0; color: #87948d; background: #f4f7f5; }
 .pickup-select-label { display: flex; flex-direction: column; gap: 6px; margin-top: 15px; color: #42524a; font-size: 12px; font-weight: 650; }
 .pickup-select-label select { min-height: 44px; padding: 0 12px; border: 1px solid #cddbd3; border-radius: 10px; color: var(--text); background: #fff; font: inherit; }
 .detail-actions { position: sticky; bottom: 0; display: flex; gap: 10px; margin: 14px -22px -18px; padding: 12px 22px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid #e8ece9; background: rgba(255,255,255,.97); }
@@ -231,6 +233,24 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .owner-listing-actions .delete-listing-button:hover { background: #fff5f5; }
 .detail-message-button { flex: 1; border: 1px solid #168761; color: #157d5d; background: #fff; }
 .detail-reserve-button { flex: 1.2; }
+.detail-browse-actions { flex-direction: column; align-items: stretch; gap: 8px; }
+.reserve-swipe-hint { margin: 0; color: #64736b; text-align: left; font-size: 12px; font-weight: 650; }
+.reserve-swipe-control { position: relative; width: 100%; height: 72px; overflow: hidden; border-radius: 999px; background: var(--brand); touch-action: pan-y; user-select: none; }
+.reserve-swipe-control.is-disabled { background: #aebdb5; }
+.reserve-swipe-control.is-complete { display: flex; align-items: center; justify-content: center; padding: 0 18px; background: var(--brand); }
+.reserve-swipe-complete-message { color: #fff; text-align: center; font-size: 13px; font-weight: 700; line-height: 1.35; }
+.reserve-swipe-track-label { position: absolute; inset: 0; display: grid; place-items: center; color: #ffffffbd; font-size: 14px; font-weight: 650; pointer-events: none; }
+.reserve-swipe-control .swapright-arrow-trail { position: absolute; top: 50%; right: 20px; display: inline-flex; align-items: center; color: #fff; transform: translateY(-50%); }
+.swapright-arrow-trail i { width: 10px; height: 10px; margin-left: -3px; border-top: 3px solid currentColor; border-right: 3px solid currentColor; transform: rotate(45deg); opacity: .35; animation: swapright-arrow-move 1s ease-in-out infinite; }
+.swapright-arrow-trail i:nth-child(2) { animation-delay: .14s; }
+.swapright-arrow-trail i:nth-child(3) { animation-delay: .28s; }
+@keyframes swapright-arrow-move { 0%, 100% { translate: -3px 0; opacity: .35; } 50% { translate: 4px 0; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .swapright-arrow-trail i { animation: none; opacity: .8; } }
+.reserve-swipe-thumb { position: absolute; z-index: 1; top: 4px; left: 4px; width: 64px; height: 64px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 50%; color: #fff; background: var(--brand-dark); box-shadow: 0 2px 8px #145c453d; cursor: grab; touch-action: none; transition: transform .12s ease-out; }
+.reserve-swipe-thumb:active { cursor: grabbing; }
+.reserve-swipe-thumb span { font-size: 9px; font-weight: 750; }
+.reserve-swipe-thumb:focus-visible { outline: 3px solid #f3d879; outline-offset: 2px; }
+.reserve-swipe-control.is-disabled .reserve-swipe-thumb { cursor: not-allowed; background: #8a9b92; }
 .detail-actions button:disabled { border-color: #e0e3e1; color: #939a96; background: #ecefed; cursor: not-allowed; transform: none; }
 .photo-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }
 .photo-preview-grid img { width: 100%; height: 74px; object-fit: cover; border: 1px solid #dbe4df; border-radius: 10px; }

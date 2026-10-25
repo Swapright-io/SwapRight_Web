@@ -91,6 +91,9 @@ export default function MarketplaceShell({ user }: { user: User }) {
   const chatWasAtBottom = useRef(true);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [selectedPickup, setSelectedPickup] = useState("");
+  const [reserveSwipeOffset, setReserveSwipeOffset] = useState(0);
+  const reserveSwipeTrackRef = useRef<HTMLDivElement | null>(null);
+  const reserveSwipeGestureRef = useRef<{ pointerId: number; startX: number; startOffset: number } | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [profileScreen, setProfileScreen] = useState<ProfileScreen>("account");
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
@@ -617,6 +620,66 @@ export default function MarketplaceShell({ user }: { user: User }) {
     }
   }
 
+  function finishReserveSwipe(pointerId?: number, pointerX?: number) {
+    const gesture = reserveSwipeGestureRef.current;
+    if (!gesture || (pointerId !== undefined && gesture.pointerId !== pointerId)) return;
+    reserveSwipeGestureRef.current = null;
+    const track = reserveSwipeTrackRef.current;
+    const thumb = track?.querySelector<HTMLElement>(".reserve-swipe-thumb");
+    const maxOffset = track && thumb ? Math.max(0, track.clientWidth - thumb.offsetWidth - 8) : 0;
+    const finalOffset = pointerX === undefined ? reserveSwipeOffset : Math.max(0, Math.min(maxOffset, gesture.startOffset + pointerX - gesture.startX));
+    if (maxOffset > 0 && finalOffset >= maxOffset * 0.82 && selectedPickup && !busy && selectedListing?.status === "available") {
+      setReserveSwipeOffset(maxOffset);
+      void reserveSelectedListing().finally(() => setReserveSwipeOffset(0));
+    } else {
+      setReserveSwipeOffset(0);
+    }
+  }
+
+  function handleReserveSwipePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!selectedPickup || busy || selectedListing?.status !== "available") return;
+    const track = reserveSwipeTrackRef.current;
+    const thumb = event.currentTarget;
+    if (!track) return;
+    const maxOffset = Math.max(0, track.clientWidth - thumb.offsetWidth - 8);
+    reserveSwipeGestureRef.current = { pointerId: event.pointerId, startX: event.clientX, startOffset: reserveSwipeOffset };
+    thumb.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    if (maxOffset === 0) return;
+  }
+
+  function handleReserveSwipePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const gesture = reserveSwipeGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const track = reserveSwipeTrackRef.current;
+    const thumb = event.currentTarget;
+    if (!track) return;
+    const maxOffset = Math.max(0, track.clientWidth - thumb.offsetWidth - 8);
+    setReserveSwipeOffset(Math.max(0, Math.min(maxOffset, gesture.startOffset + event.clientX - gesture.startX)));
+  }
+
+  function handleReserveSwipeKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!selectedPickup || busy || selectedListing?.status !== "available") return;
+    if (event.key === "Home" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      setReserveSwipeOffset(0);
+      return;
+    }
+    if (event.key !== "ArrowRight" && event.key !== "End" && event.key !== "Enter") return;
+    event.preventDefault();
+    const track = reserveSwipeTrackRef.current;
+    const thumb = event.currentTarget;
+    if (!track) return;
+    const maxOffset = Math.max(0, track.clientWidth - thumb.offsetWidth - 8);
+    const nextOffset = event.key === "Enter" || event.key === "End" ? maxOffset : Math.min(maxOffset, reserveSwipeOffset + Math.max(16, maxOffset * 0.18));
+    if (maxOffset > 0 && nextOffset >= maxOffset * 0.82) {
+      setReserveSwipeOffset(maxOffset);
+      void reserveSelectedListing().finally(() => setReserveSwipeOffset(0));
+    } else {
+      setReserveSwipeOffset(nextOffset);
+    }
+  }
+
   function showListingDetails(listing: Listing) {
     setSelectedReservation(null);
     setSelectedListing(listing);
@@ -781,9 +844,9 @@ export default function MarketplaceShell({ user }: { user: User }) {
               {reservationDetailMode === "donor" && <p><strong>Receiver:</strong> {selectedReservation.claimant_name || "Campus student"}</p>}
             </div>}
             <h2>Description</h2><p className="detail-description">{selectedListing.description || "The donor did not add a description."}</p>
-            <div className="donor-location-card"><div className="donor-avatar">{(selectedListing.owner_name || "S").slice(0, 1).toUpperCase()}</div><div><strong>{selectedListing.owner_id === user.id ? "You · donor" : selectedListing.owner_name || "Campus student"}</strong><span><LocationIcon /> Pickup at {selectedListing.pickup_area}</span></div>{selectedListing.owner_id !== user.id && <span className="verified-pill">Verified</span>}</div>
+            <div className="donor-location-card"><div className="donor-avatar">{(selectedListing.owner_name || "S").slice(0, 1).toUpperCase()}</div><div><strong>{selectedListing.owner_id === user.id ? "You · donor" : selectedListing.owner_name || "Campus student"}</strong><span><LocationIcon /> Pickup at {selectedListing.pickup_area}</span></div>{selectedListing.owner_id !== user.id && <button className="donor-message-inline" disabled={!(reservations.some((row) => row.listing_id === selectedListing.id && row.status === "pending") || conversations.some((row) => row.listing_id === selectedListing.id && row.interested_user_id === user.id))} onClick={() => void messageSelectedDonor()}>Message donor</button>}{selectedListing.owner_id !== user.id && <span className="verified-pill">Verified</span>}</div>
             {selectedListing.owner_id !== user.id && selectedListing.status === "available" && <label className="pickup-select-label">Choose pickup location<select required value={selectedPickup} onChange={(event) => setSelectedPickup(event.target.value)}><option value="">Select a pickup location</option><option value={selectedListing.pickup_area}>{selectedListing.pickup_area}</option></select></label>}
-            {selectedReservation ? selectedReservation.claimant_id === user.id ? selectedReservation.status === "pending" ? <div className="detail-actions reservation-detail-actions"><button className="secondary-button detail-message-button" disabled={!selectedReservation.donor_id} onClick={async () => { if (await startConversation(selectedReservation)) { setSelectedReservation(null); setSelectedListing(null); } }}>Message donor</button><button className="outline-action cancel-reservation-button" disabled={busy} onClick={() => void cancelReservation(selectedReservation.id)}>Cancel reservation</button><button className="primary-button" disabled={busy || selectedReservation.claim_confirmation_status !== "not_requested"} onClick={() => setConfirmClaimPrompt(true)}>{selectedReservation.claim_confirmation_status === "awaiting_donor" ? "Waiting for donor" : "Item claimed"}</button></div> : null : reservationDetailMode === "donor" && selectedReservation.status === "pending" && selectedReservation.claim_confirmation_status === "awaiting_donor" ? <div className="detail-actions reservation-detail-actions"><button className="outline-action" disabled={busy} onClick={() => void resolveClaimConfirmation(selectedReservation, false)}>Not claimed</button><button className="primary-button" disabled={busy} onClick={() => void resolveClaimConfirmation(selectedReservation, true)}>Confirm item claimed</button></div> : null : selectedListing.owner_id === user.id ? <div className="detail-actions owner-listing-actions"><button className="secondary-button" onClick={() => openEditListing(selectedListing)}>Edit listing</button><button className="delete-listing-button" onClick={() => { setError(""); setDeleteListingPrompt(true); }}>Delete listing</button></div> : <div className="detail-actions"><button className="secondary-button detail-message-button" disabled={!(reservations.some((row) => row.listing_id === selectedListing.id && row.status === "pending") || conversations.some((row) => row.listing_id === selectedListing.id && row.interested_user_id === user.id))} onClick={() => void messageSelectedDonor()}>Message donor</button><button className="primary-button detail-reserve-button" disabled={selectedListing.status !== "available" || !selectedPickup || busy} onClick={() => void reserveSelectedListing()}>{selectedListing.status === "reserved" ? "Reserved" : "SwapRight"}</button></div>}
+            {selectedReservation ? selectedReservation.claimant_id === user.id ? selectedReservation.status === "pending" ? <div className="detail-actions reservation-detail-actions"><button className="outline-action cancel-reservation-button" disabled={busy} onClick={() => void cancelReservation(selectedReservation.id)}>Cancel reservation</button><button className="primary-button" disabled={busy || selectedReservation.claim_confirmation_status !== "not_requested"} onClick={() => setConfirmClaimPrompt(true)}>{selectedReservation.claim_confirmation_status === "awaiting_donor" ? "Waiting for donor" : "Item claimed"}</button></div> : null : reservationDetailMode === "donor" && selectedReservation.status === "pending" && selectedReservation.claim_confirmation_status === "awaiting_donor" ? <div className="detail-actions reservation-detail-actions"><button className="outline-action" disabled={busy} onClick={() => void resolveClaimConfirmation(selectedReservation, false)}>Not claimed</button><button className="primary-button" disabled={busy} onClick={() => void resolveClaimConfirmation(selectedReservation, true)}>Confirm item claimed</button></div> : null : selectedListing.owner_id === user.id ? <div className="detail-actions owner-listing-actions"><button className="secondary-button" onClick={() => openEditListing(selectedListing)}>Edit listing</button><button className="delete-listing-button" onClick={() => { setError(""); setDeleteListingPrompt(true); }}>Delete listing</button></div> : <div className="detail-actions detail-browse-actions"><p className="reserve-swipe-hint">{selectedListing.status === "reserved" ? "Item has been reserved" : "Swipe right to reserve this item"}</p><div className={`reserve-swipe-control${selectedListing.status === "reserved" ? " is-complete" : !selectedPickup || busy ? " is-disabled" : ""}`} ref={reserveSwipeTrackRef} role="group" aria-label={selectedListing.status === "reserved" ? "Item has been reserved" : "Swipe right to reserve this item"}>{selectedListing.status === "reserved" ? <span className="reserve-swipe-complete-message">Item has been reserved. Check your Reservations tab</span> : <><span className="reserve-swipe-track-label" aria-hidden="true">SwapRight</span><span className="swapright-arrow-trail" aria-hidden="true"><i /><i /><i /></span><div className="reserve-swipe-thumb" role="slider" aria-label="SwapRight reservation slider" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(reserveSwipeOffset)} aria-disabled={!selectedPickup || busy} tabIndex={!selectedPickup || busy ? -1 : 0} style={{ transform: `translateX(${reserveSwipeOffset}px)` }} onKeyDown={handleReserveSwipeKeyDown} onPointerDown={handleReserveSwipePointerDown} onPointerMove={handleReserveSwipePointerMove} onPointerUp={(event) => finishReserveSwipe(event.pointerId, event.clientX)} onPointerCancel={(event) => finishReserveSwipe(event.pointerId)} onLostPointerCapture={(event) => finishReserveSwipe(event.pointerId)}><span>Drag Slider</span></div></>}</div></div>}
             {reservationDetailMode === "donor" && selectedReservation?.donor_id === user.id && selectedReservation.claim_confirmation_status === "confirmed" && <p className="claim-waiting-note claim-confirmed-note">Success! You and the receiver have both confirmed the item handoff.</p>}
           </div>
         </section> : tab === "browse" && <>

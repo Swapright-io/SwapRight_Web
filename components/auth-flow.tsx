@@ -196,11 +196,8 @@ export default function AuthFlow() {
       <main className="auth-page">
         <section className="auth-card welcome-screen">
           <div className="welcome-content">
-            <div className="hero-art" aria-hidden="true">
-              <span className="art-card art-electronics" />
-              <span className="art-card art-furniture" />
-              <span className="art-card art-books" />
-              <span className="art-arrow">→</span>
+            <div className="hero-art hero-logo">
+              <Image src="/SwapRight%20logo.png" alt="SwapRight logo" fill priority sizes="(max-width: 760px) 420px, 440px" />
             </div>
             <div className="welcome-copy">
               <h1>Give it a second life.</h1>
